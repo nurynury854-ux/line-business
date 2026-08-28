@@ -1,3 +1,22 @@
+/**
+ * NOT DEAD CODE — DO NOT DELETE.
+ *
+ * Nothing in src/ imports this any more: the booking UI renders its grid from
+ * GET /api/availability, so production availability is decided by decideSlot in
+ * ./availability.ts.
+ *
+ * This file is deliberately retained as an INDEPENDENT ORACLE for those rules.
+ * It implements the same behaviour by a different route — generating a whole
+ * grid from tenant config rather than validating one point against database
+ * rows — and scripts/verify-slots.ts asserts the two never disagree across the
+ * full day at 15-minute resolution.
+ *
+ * That only works because this file is not touched when the server changes. A
+ * static analyser, or a reasonable person tidying unused exports, will read it
+ * as removable. It is not: deleting it removes the only check that would catch
+ * an unintended change to the production availability rules.
+ */
+
 import type { BookedSlot, TenantConfig } from "@config/tenants/types";
 import {
   type CalendarDate,

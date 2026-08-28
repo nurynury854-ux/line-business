@@ -68,15 +68,31 @@ check("Monday returns []", generateSlots({ tenant: demoTenant, date: monday.date
 
 
 // ===========================================================================
-// PARITY — THIS TEST IS LOAD-BEARING. DO NOT "FIX" IT BY EDITING THE ASSERTION.
+// PARITY — AN INDEPENDENT ORACLE FOR THE AVAILABILITY RULES.
 //
-// If it fails, one of the two rule implementations has drifted from the other.
-// The correct response is to find which file changed and update the STALE RULE
-// there. Relaxing or deleting an assertion here removes the only thing keeping
-// the client's offered grid and the server's accepted bookings in agreement —
-// and the symptom of that divergence is a customer being shown a slot the
-// server then refuses, or worse, accepting one the client should never have
-// offered.
+// What this guards has CHANGED, so read this before acting on a failure.
+//
+// It used to guard client/server drift: the booking UI generated its grid with
+// generateSlots, and a disagreement meant a customer could be shown a slot the
+// server would refuse. That risk is gone — the UI now renders from
+// GET /api/availability, so generateSlots is no longer in any production path.
+//
+// What it guards NOW is regression in the rules themselves. decideSlot in
+// src/lib/booking/availability.ts is the single authority for production, and
+// authority with no second opinion is where a quiet behaviour change lives.
+// src/lib/booking/slots.ts is that second opinion: the same rules reached by a
+// different route — whole-grid generation from tenant config, rather than
+// single-point validation against database rows. Because nobody edits it while
+// changing the server, a disagreement is evidence the SERVER moved.
+//
+// ON FAILURE, decideSlot is authoritative and slots.ts is the oracle:
+//   - server change was INTENTIONAL  -> update slots.ts to match, keep the test
+//   - server change was UNINTENTIONAL -> you have just caught a regression
+// Never reconcile them by relaxing or deleting an assertion here. That converts
+// a caught regression into a shipped one.
+//
+// AND: src/lib/booking/slots.ts is NOT dead code, despite nothing in src/
+// importing it. Deleting it deletes the oracle. See the note at its head.
 //
 // PARITY: the client grid vs the server's single-slot decision
 //
