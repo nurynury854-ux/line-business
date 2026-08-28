@@ -10,9 +10,12 @@
   },
   "dependencies": {
     "@line/liff": "^2.30.0",
+    "@supabase/supabase-js": "^2.112.4",
+    "jose": "^6.2.10",
     "next": "15.5.24",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

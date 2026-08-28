@@ -1,6 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
 import { demoTenant } from "@config/tenants/demo";
 import { ANY_STAFF, buildDateOptions, generateSlots } from "@/lib/booking/slots";
 import { weekdayOf } from "@/lib/time/taipei";
+import { decideSlot } from "@/lib/booking/availability";
 
 const NOW = new Date("2026-08-28T12:00:00+08:00");
 const show = (s: { start: string; isAvailable: boolean; reason?: string }[]) =>
@@ -63,5 +66,160 @@ check("perm grid still steps by 30min", perm.slice(0, 3).map((s) => s.start), ["
 console.log("\n=== closed day yields no slots ===");
 check("Monday returns []", generateSlots({ tenant: demoTenant, date: monday.date, serviceId: "cut", staffId: ANY_STAFF, now: NOW }).length, 0);
 
-console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
-process.exit(failures === 0 ? 0 : 1);
+
+// ===========================================================================
+// PARITY — THIS TEST IS LOAD-BEARING. DO NOT "FIX" IT BY EDITING THE ASSERTION.
+//
+// If it fails, one of the two rule implementations has drifted from the other.
+// The correct response is to find which file changed and update the STALE RULE
+// there. Relaxing or deleting an assertion here removes the only thing keeping
+// the client's offered grid and the server's accepted bookings in agreement —
+// and the symptom of that divergence is a customer being shown a slot the
+// server then refuses, or worse, accepting one the client should never have
+// offered.
+//
+// PARITY: the client grid vs the server's single-slot decision
+//
+// src/lib/booking/slots.ts and src/lib/booking/availability.ts implement the
+// same rules against different shapes. This walks the whole time axis of a day
+// and asserts they never disagree — the guard against one drifting from the
+// other when a rule changes.
+// ===========================================================================
+console.log("\n=== parity: client grid vs server decision ===");
+
+function parityForDate(date: string, serviceId: string) {
+  const service = demoTenant.services.find((s) => s.id === serviceId)!;
+  const weekday = weekdayOf(date);
+  const spans = demoTenant.businessHours[weekday].map((r) => ({
+    opensAt: r.start,
+    closesAt: r.end,
+  }));
+
+  const clientGrid = new Set(
+    generateSlots({ tenant: demoTenant, date, serviceId, staffId: ANY_STAFF, now: NOW })
+      .map((slot) => slot.start),
+  );
+
+  const disagreements: string[] = [];
+  for (let minutes = 0; minutes < 24 * 60; minutes += 15) {
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    const decision = decideSlot({
+      date, time,
+      serviceDurationMinutes: service.durationMinutes,
+      spansForWeekday: spans,
+      isClosedDate: demoTenant.closedDates.includes(date),
+      slotIntervalMinutes: demoTenant.booking.slotIntervalMinutes,
+      minimumLeadTimeMinutes: demoTenant.booking.minimumLeadTimeMinutes,
+      bookingWindowDays: demoTenant.booking.windowDays,
+      now: NOW,
+    });
+
+    const inClientGrid = clientGrid.has(time);
+    // The client omits a time entirely when the rules exclude it; the server
+    // says ok, or inside_lead_time for a slot that exists but is too soon.
+    const serverOffers = decision.ok || (!decision.ok && decision.reason === "inside_lead_time");
+
+    if (inClientGrid !== serverOffers) {
+      disagreements.push(
+        `${time}: client ${inClientGrid ? "offers" : "omits"}, server ${
+          decision.ok ? "ok" : decision.reason}`,
+      );
+    }
+  }
+  return disagreements;
+}
+
+for (const [date, serviceId, label] of [
+  ["2026-08-28", "cut", "today, 60min"],
+  ["2026-08-30", "perm", "Sunday, 180min (fit before close)"],
+  ["2026-09-10", "cut", "Thursday, split day with lunch break"],
+  ["2026-08-31", "cut", "Monday, weekly day off"],
+  ["2026-09-03", "cut", "one-off closed date"],
+] as const) {
+  const disagreements = parityForDate(date, serviceId);
+  check(`parity ${date} (${label})`, disagreements.length, 0);
+  if (disagreements.length > 0) {
+    console.log("      " + disagreements.slice(0, 4).join("\n      "));
+  }
+}
+
+// ===========================================================================
+// CONCURRENCY: 23P01 is the real guarantee, not the availability check
+// ===========================================================================
+async function concurrencyCase() {
+  console.log("\n=== concurrency: exclusion constraint under a race ===");
+
+  for (const raw of fs.existsSync(path.join(process.cwd(), ".env.local"))
+    ? fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8").split("\n")
+    : []) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) continue;
+    const at = line.indexOf("=");
+    const key = line.slice(0, at).trim();
+    if (!(key in process.env)) {
+      process.env[key] = line.slice(at + 1).trim().replace(/^["']|["']$/g, "");
+    }
+  }
+
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_JWT_SECRET) {
+    console.log("SKIP  no .env.local — database checks not run");
+    return;
+  }
+
+  const { mintSessionToken } = await import("@/lib/supabase/tokens");
+  const { createRequestScopedClient } = await import("@/lib/supabase/client");
+
+  const TENANT = "11111111-1111-4111-8111-111111111111";
+  const STAFF = "33333333-3333-4333-8333-000000000001";
+  const SERVICE = "22222222-2222-4222-8222-000000000001";
+  // Far outside the booking window on purpose, so this can never collide with
+  // real data. The constraint does not care about the window; the route does.
+  const START = "2030-01-15T02:00:00.000Z";
+
+  const client = createRequestScopedClient(
+    await mintSessionToken(TENANT, "concurrency-probe"),
+  );
+
+  const { data: customer } = await client
+    .from("customers")
+    .upsert({ tenant_id: TENANT, line_user_id: "concurrency-probe" },
+            { onConflict: "tenant_id,line_user_id" })
+    .select("id").single();
+
+  if (!customer) {
+    console.log("FAIL  could not create probe customer");
+    failures++;
+    return;
+  }
+
+  const insert = () =>
+    client.from("bookings").insert({
+      tenant_id: TENANT, customer_id: customer.id, service_id: SERVICE,
+      staff_id: STAFF, starts_at: START, duration_minutes: 60,
+      price_twd: 800, status: "confirmed",
+    }).select("id").single();
+
+  // Fired together: both pass any availability check, both reach the database.
+  const [first, second] = await Promise.all([insert(), insert()]);
+  const results = [first, second];
+  const created = results.filter((r) => r.data);
+  const rejected = results.filter((r) => r.error);
+
+  check("exactly one of two racing inserts succeeds", created.length, 1);
+  check("the loser fails with SQLSTATE 23P01",
+        rejected[0]?.error?.code ?? "none", "23P01");
+
+  // Cancel rather than delete: there is no DELETE policy for authenticated, by
+  // design. A cancelled booking no longer occupies the slot.
+  for (const row of created) {
+    if (row.data) {
+      await client.from("bookings").update({ status: "cancelled" }).eq("id", row.data.id);
+    }
+  }
+  console.log("      cleaned up: probe bookings cancelled");
+}
+
+concurrencyCase().then(() => {
+  console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
+  process.exit(failures === 0 ? 0 : 1);
+});
