@@ -167,6 +167,65 @@ export function rankStaffByDayLoad(
   });
 }
 
+export type DaySlot = {
+  start: WallClock;
+  isAvailable: boolean;
+  reason?: "past" | "booked";
+};
+
+/**
+ * The whole day's grid, for the booking UI.
+ *
+ * Enumeration here is deliberately GENEROUS — every interval step from each
+ * span's opening — and every candidate is then put through decideSlot, which
+ * stays the single authority on whether a time is bookable. That is why this
+ * is not a third implementation of the rules: it cannot accept anything
+ * decideSlot rejects.
+ */
+export function buildDaySlots(params: {
+  request: Omit<SlotRequest, "time">;
+  staffIds: string[];
+  bookings: ExistingBooking[];
+}): DaySlot[] {
+  const { request, staffIds, bookings } = params;
+  const slots: DaySlot[] = [];
+
+  for (const span of request.spansForWeekday) {
+    const opens = wallClockToMinutes(span.opensAt);
+    const closes = wallClockToMinutes(span.closesAt);
+
+    for (
+      let minutes = opens;
+      minutes + request.serviceDurationMinutes <= closes;
+      minutes += request.slotIntervalMinutes
+    ) {
+      const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+      const decision = decideSlot({ ...request, time });
+
+      if (!decision.ok) {
+        // Times excluded by the calendar were never real options and are not
+        // rendered at all. Only "too soon" is shown, disabled.
+        if (decision.reason === "inside_lead_time") {
+          slots.push({ start: time, isAvailable: false, reason: "past" });
+        }
+        continue;
+      }
+
+      const anyoneFree = staffIds.some((id) =>
+        staffFreeAt(id, decision.startsAt, decision.endsAt, bookings),
+      );
+
+      slots.push(
+        anyoneFree
+          ? { start: time, isAvailable: true }
+          : { start: time, isAvailable: false, reason: "booked" },
+      );
+    }
+  }
+
+  return slots;
+}
+
 /** Taipei-day bounds as instants, for querying overlapping bookings. */
 export function taipeiDayBounds(date: CalendarDate): { start: Date; end: Date } {
   return {

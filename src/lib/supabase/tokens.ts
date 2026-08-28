@@ -95,6 +95,21 @@ export async function mintTenantLookupToken(tenantSlug: string): Promise<string>
 }
 
 /**
+ * Tenant-scoped READ token: carries tenant_id but no line_user_id.
+ *
+ * Satisfies the tenant-scoped read policies (services, staff, business_hours,
+ * closed_dates, bookings) and NOT the customer-scoped ones — customers_read_self
+ * and bookings_insert_self both require a line_user_id claim, so this token can
+ * see that a slot is taken but cannot see who took it, and cannot write.
+ *
+ * Used by the availability endpoint, which has no verified identity to work
+ * from: a customer must be able to see what is free before logging in.
+ */
+export async function mintTenantReadToken(tenantId: string): Promise<string> {
+  return mint({ tenant_id: tenantId });
+}
+
+/**
  * Phase two: the real request token, minted only AFTER LINE has verified the ID
  * token. `lineUserId` must be the `sub` of the verified token — never a value
  * the client supplied (CLAUDE.md §3).

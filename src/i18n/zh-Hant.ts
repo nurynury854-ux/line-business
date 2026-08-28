@@ -49,6 +49,25 @@ export const messages = {
 
   "booking.loading": "載入中…",
 
+  "booking.liff.preparing": "正在連線 LINE…",
+  "booking.liff.redirecting": "前往 LINE 登入…",
+  "booking.liff.needLogin": "送出預約時需要登入 LINE。",
+  "booking.liff.unavailable": "無法連線 LINE，請重新整理後再試。",
+
+  "booking.slots.loading": "查詢可預約時段…",
+  "booking.slots.error": "無法取得時段，請重新整理。",
+  "booking.slots.retry": "重新查詢",
+
+  "booking.submit.inProgress": "預約送出中…",
+  "booking.error.conflict": "這個時段剛被其他客人預約了，已為您更新時段，請重新選擇。",
+  "booking.error.notBookable": "這個時段目前無法預約，請選擇其他時段。",
+  "booking.error.network": "連線失敗，請確認網路後再試一次。",
+  "booking.error.generic": "預約失敗，請稍後再試。",
+  "booking.error.needLogin": "請先登入 LINE 再送出預約。",
+
+  "booking.done.reference": "預約編號",
+  "booking.done.reassigned": "原設計師已額滿，已為您安排其他可服務的設計師。",
+
   "weekday.0": "週日",
   "weekday.1": "週一",
   "weekday.2": "週二",

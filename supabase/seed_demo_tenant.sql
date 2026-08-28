@@ -4,9 +4,16 @@
 -- repeatedly. Fixed UUIDs so re-running updates rows rather than duplicating
 -- them, and so scripts/verify-role-mapping.mjs can reference the tenant id.
 --
--- >>> BEFORE RUNNING: replace REPLACE_ME_LOGIN_CHANNEL_ID below with this
--- >>> salon's LINE Login channel id. It is the expected `aud` when verifying an
--- >>> ID token, so a wrong value makes every verification fail (CLAUDE.md §3).
+-- liff_id and line_login_channel_id are left unset here ON PURPOSE. They differ
+-- per environment and the SQL editor cannot read environment variables, so
+-- hand-editing this file before each run is how a staging id reaches
+-- production. Set them after seeding with:
+--
+--   NODE_OPTIONS=--conditions=react-server npx tsx scripts/set-tenant-line-ids.ts
+--
+-- which reads SEED_DEMO_LIFF_ID and SEED_DEMO_LINE_LOGIN_CHANNEL_ID from
+-- .env.local. Until the channel id is set, every ID token verification fails,
+-- because it is the expected `aud` (CLAUDE.md §3).
 
 insert into public.tenants (
   id, slug, name, logo_url, brand,
