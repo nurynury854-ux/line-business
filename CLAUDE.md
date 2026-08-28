@@ -44,7 +44,9 @@ Isolation model: **shared tables + Postgres Row Level Security.**
 - Verification means checking signature, `aud` (our channel ID), `iss`, and `exp`. Never decode without verifying.
 - The `sub` claim from the *verified* token is the only acceptable source of a LINE user ID. A handler that reads a user ID from the request body, a query param, or client state is a bug.
 - `liff.getProfile()` output is display data only — name and avatar for the UI. It is never an authorization input.
-- Treat **`(tenant_id, line_user_id)`** as the user identity key, never `line_user_id` alone. LINE user IDs are unique only within a channel/provider, and our channel topology is still open (see Open decisions). This form is correct under either topology, so write it this way now.
+- Treat **`(tenant_id, line_user_id)`** as the user identity key, never `line_user_id` alone. This is load-bearing, not defensive: with one Login channel per salon, the same physical person genuinely has a different `sub` at each salon, because LINE user IDs are unique only within a channel.
+- The expected **`aud` comes from `tenants.line_login_channel_id`** for the resolved tenant, read per request — never from an env var. A global channel id is wrong for every salon but one, and checking `aud` is exactly what stops Salon A's token from being replayed against Salon B.
+- **Resolve the tenant before verifying**, because its channel id is what you verify against: resolve tenant from the request → read `line_login_channel_id` → verify the token against that `aud` → take `sub`. Reject early if the tenant does not resolve. The tenant identifier arrives unverified from the client, and that is fine — it only selects which `aud` to check, and a wrong guess makes verification fail. Do not "harden" this into something that breaks it.
 
 ## 4. Time and timezone
 
@@ -94,9 +96,15 @@ Note: tenant-specific copy (section 5) is tenant *data*, not translation strings
 
 ## Open decisions — ask, do not assume
 
-- **LINE channel topology.** One shared LIFF app across all salons, versus one LINE channel per salon, is undecided. Until it is settled, write identity code that is correct under both: key users on `(tenant_id, line_user_id)`, and never assume a LINE userId is comparable across tenants.
-- **Date/time library** — not chosen.
-- **i18n library** — not chosen.
+- **Date/time library** — not chosen. Timezone handling currently uses `Intl` plus an explicit `+08:00`, confined to `src/lib/time/taipei.ts`.
+- **i18n library** — not chosen. Strings sit behind keys in `src/i18n/`, in a shape a real library can consume.
+
+## Settled decisions
+
+- **LINE channel topology: one Login channel per salon**, under a Provider in that salon's legal name. This follows LINE's policy for agency integrations, so it is not a free choice. Consequences: `liff_id` and `line_login_channel_id` are per-tenant columns and never env vars, and onboarding a salon means a new Provider, two channels, and a LIFF app.
+- **Tenancy: shared tables with RLS.** RLS is a backstop. The primary defence is the route verifying a LINE ID token, then minting a short-lived Supabase JWT (HS256, secret used as its UTF-8 string) whose claims the policies read. That JWT never reaches the browser.
+- **Booking statuses:** `confirmed` / `cancelled` / `completed` / `no_show`. Adding `pending` later is anticipated — see the comment on the `bookings_status_valid` constraint.
+- **Currency renders via the locale layer** (`$800` for TWD in zh-Hant-TW), not hand-built strings.
 
 ## Repo status
 
