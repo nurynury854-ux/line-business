@@ -5,68 +5,97 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /**
  * LIFF diagnostics screen.
  *
- * This is a developer tool, not customer UI. It exists to surface LIFF init
- * results and failures on a physical phone, where there is no console.
+ * A developer tool, not customer UI: it surfaces LIFF results and failures on a
+ * physical phone, where there is no console.
  *
- * Two deliberate deviations from CLAUDE.md, both scoped to this screen:
- *  - §7 (i18n): labels are untranslated English on purpose. This screen should
- *    be localised or deleted before anything customer-facing ships.
- *  - §3 (identity): the userId rendered here is DISPLAY ONLY. Client-reported
- *    identity must never authorise anything — the server verifies the ID token
- *    itself. Nothing here is wired to the database.
+ * Two deliberate deviations from CLAUDE.md, scoped to this screen:
+ *  - §7 (i18n): labels are untranslated English on purpose. Localise or delete
+ *    this screen before anything customer-facing ships.
+ *  - §3 (identity): everything shown here is DISPLAY ONLY. Nothing is wired to
+ *    the database, and the ID token is decoded WITHOUT verification purely to
+ *    show its claims — the server verifies it properly against LINE.
+ *
+ * Each capability is probed INDEPENDENTLY. A missing scope must degrade to
+ * "unavailable" for that one row, never fail the whole page: the screen exists
+ * to explain failures, so it has to survive them.
  */
+
+type Probe<T> =
+  | { state: "ok"; value: T }
+  | { state: "unavailable"; detail: string };
 
 type LiffProfile = {
   userId: string;
   displayName: string;
   pictureUrl?: string;
-  statusMessage?: string;
 };
 
-type LiffEnvironment = {
+type IdTokenInfo = {
+  length: number;
+  sub?: string;
+  aud?: string;
+  expiresInSeconds?: number;
+};
+
+type Report = {
+  liffId: string;
   isInClient: boolean;
+  isLoggedIn: boolean;
   os: string;
   language: string;
   sdkVersion: string;
+  idToken: Probe<IdTokenInfo>;
+  profile: Probe<LiffProfile>;
 };
 
 type Phase =
   | { status: "loading" }
   | { status: "redirecting" }
-  | { status: "ready"; profile: LiffProfile; environment: LiffEnvironment }
+  | { status: "ready"; report: Report }
   | { status: "error"; detail: string };
 
-/**
- * Renders an unknown thrown value as readable text without losing anything.
- * LIFF rejects with objects carrying a `code` (e.g. INVALID_ARGUMENT,
- * UNAUTHORIZED), which is usually the most diagnostic part, so it goes first.
- */
 function describeError(error: unknown): string {
   if (error instanceof Error) {
-    const sections: string[] = [];
+    const parts: string[] = [];
     const code = (error as { code?: unknown }).code;
-    if (code !== undefined) sections.push(`code: ${String(code)}`);
-    sections.push(`${error.name}: ${error.message}`);
-    if (error.stack) sections.push(error.stack);
-    return sections.join("\n\n");
+    if (code !== undefined) parts.push(`code: ${String(code)}`);
+    parts.push(`${error.name}: ${error.message}`);
+    if (error.stack) parts.push(error.stack);
+    return parts.join("\n\n");
   }
-
   if (typeof error === "object" && error !== null) {
     try {
       return JSON.stringify(error, null, 2);
     } catch {
-      // Circular or otherwise unserialisable — fall through to String().
+      /* unserialisable */
     }
   }
-
   return String(error);
+}
+
+/**
+ * Reads claims for DISPLAY. This is not verification and must never be treated
+ * as such — the server checks the signature, audience and issuer against LINE.
+ */
+function peekIdTokenClaims(token: string): Omit<IdTokenInfo, "length"> {
+  try {
+    const payload = JSON.parse(
+      atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { sub?: string; aud?: string; exp?: number };
+    return {
+      sub: payload.sub,
+      aud: payload.aud,
+      expiresInSeconds: payload.exp
+        ? Math.round(payload.exp - Date.now() / 1000)
+        : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 
 export default function LiffDiagnostics() {
   const [phase, setPhase] = useState<Phase>({ status: "loading" });
-
-  // React runs effects twice in development. liff.init() is not idempotent,
-  // so the second call must not happen.
   const hasStarted = useRef(false);
 
   const initialise = useCallback(async () => {
@@ -80,29 +109,58 @@ export default function LiffDiagnostics() {
         );
       }
 
-      // Imported here rather than at module scope: the SDK touches `window` on
-      // load and would break the server render.
       const liff = (await import("@line/liff")).default;
-
       await liff.init({ liffId });
 
       if (!liff.isLoggedIn()) {
-        // Full-page redirect to LINE. Nothing after this runs.
         setPhase({ status: "redirecting" });
         liff.login({ redirectUri: window.location.href });
         return;
       }
 
-      const profile = await liff.getProfile();
+      // Probed separately: openid grants the ID token, profile grants the
+      // profile. Having one and not the other is a normal configuration.
+      let idToken: Probe<IdTokenInfo>;
+      try {
+        const raw = liff.getIDToken();
+        idToken = raw
+          ? { state: "ok", value: { length: raw.length, ...peekIdTokenClaims(raw) } }
+          : {
+              state: "unavailable",
+              detail:
+                "getIDToken() returned null. The LIFF app almost certainly " +
+                "lacks the 'openid' scope — without it the server cannot " +
+                "verify identity and no booking can be written.",
+            };
+      } catch (error) {
+        idToken = { state: "unavailable", detail: describeError(error) };
+      }
+
+      let profile: Probe<LiffProfile>;
+      try {
+        profile = { state: "ok", value: await liff.getProfile() };
+      } catch (error) {
+        profile = {
+          state: "unavailable",
+          detail:
+            "getProfile() failed, which is EXPECTED when the 'profile' scope " +
+            "is not enabled. This does not block booking: the flow never calls " +
+            "it, and the server takes identity from the verified ID token.\n\n" +
+            describeError(error),
+        };
+      }
 
       setPhase({
         status: "ready",
-        profile,
-        environment: {
+        report: {
+          liffId,
           isInClient: liff.isInClient(),
+          isLoggedIn: liff.isLoggedIn(),
           os: String(liff.getOS() ?? "unknown"),
           language: liff.getLanguage(),
           sdkVersion: liff.getVersion(),
+          idToken,
+          profile,
         },
       });
     } catch (error) {
@@ -120,27 +178,52 @@ export default function LiffDiagnostics() {
     <main className="mx-auto w-full max-w-md px-4 py-6">
       <h1 className="text-lg font-semibold">LIFF diagnostics</h1>
 
-      {phase.status === "loading" && <StatusNote>Initialising LIFF…</StatusNote>}
-
-      {phase.status === "redirecting" && (
-        <StatusNote>Not logged in. Redirecting to LINE…</StatusNote>
-      )}
-
+      {phase.status === "loading" && <Note>Initialising LIFF…</Note>}
+      {phase.status === "redirecting" && <Note>Not logged in. Redirecting to LINE…</Note>}
       {phase.status === "error" && <ErrorPanel detail={phase.detail} />}
 
       {phase.status === "ready" && (
         <div className="mt-5 flex flex-col gap-6">
-          <ProfileCard profile={phase.profile} />
+          <Verdict report={phase.report} />
+
+          <section>
+            <h2 className="mb-1 text-sm font-semibold">Identity</h2>
+            <dl>
+              {phase.report.idToken.state === "ok" ? (
+                <>
+                  <Row label="getIDToken()" value={`present (${phase.report.idToken.value.length} chars)`} good />
+                  <Row label="  token sub" value={phase.report.idToken.value.sub ?? "(none)"} />
+                  <Row label="  token aud (channel id)" value={phase.report.idToken.value.aud ?? "(none)"} />
+                  <Row label="  expires in" value={`${phase.report.idToken.value.expiresInSeconds ?? "?"}s`} />
+                </>
+              ) : (
+                <RowBlock label="getIDToken()" detail={phase.report.idToken.detail} bad />
+              )}
+            </dl>
+          </section>
+
+          <section>
+            <h2 className="mb-1 text-sm font-semibold">Profile</h2>
+            {phase.report.profile.state === "ok" ? (
+              <dl>
+                <Row label="displayName" value={phase.report.profile.value.displayName} />
+                <Row label="userId" value={phase.report.profile.value.userId} />
+                <Row label="pictureUrl" value={phase.report.profile.value.pictureUrl ?? "(none)"} />
+              </dl>
+            ) : (
+              <RowBlock label="getProfile()" detail={phase.report.profile.detail} />
+            )}
+          </section>
+
           <section>
             <h2 className="mb-1 text-sm font-semibold">Environment</h2>
             <dl>
-              <Row
-                label="isInClient()"
-                value={String(phase.environment.isInClient)}
-              />
-              <Row label="getOS()" value={phase.environment.os} />
-              <Row label="getLanguage()" value={phase.environment.language} />
-              <Row label="getVersion()" value={phase.environment.sdkVersion} />
+              <Row label="liffId" value={phase.report.liffId} />
+              <Row label="isInClient()" value={String(phase.report.isInClient)} />
+              <Row label="isLoggedIn()" value={String(phase.report.isLoggedIn)} />
+              <Row label="getOS()" value={phase.report.os} />
+              <Row label="getLanguage()" value={phase.report.language} />
+              <Row label="getVersion()" value={phase.report.sdkVersion} />
             </dl>
           </section>
         </div>
@@ -149,13 +232,28 @@ export default function LiffDiagnostics() {
   );
 }
 
-function StatusNote({ children }: { children: React.ReactNode }) {
+/** The one line worth reading first: can this device book or not? */
+function Verdict({ report }: { report: Report }) {
+  const canBook = report.idToken.state === "ok";
   return (
-    <p
-      className="mt-5 text-sm text-black/60"
-      role="status"
-      aria-live="polite"
+    <section
+      className={`rounded-xl border p-3 text-sm leading-relaxed ${
+        canBook
+          ? "border-green-200 bg-green-50 text-green-900"
+          : "border-red-200 bg-red-50 text-red-900"
+      }`}
     >
+      <strong>{canBook ? "Booking should work." : "Booking will NOT work."}</strong>{" "}
+      {canBook
+        ? "LIFF initialised and an ID token is available, which is all the booking flow needs."
+        : "LIFF initialised but no ID token is available, so the server cannot establish identity."}
+    </section>
+  );
+}
+
+function Note({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-5 text-sm text-black/60" role="status" aria-live="polite">
       {children}
     </p>
   );
@@ -164,11 +262,7 @@ function StatusNote({ children }: { children: React.ReactNode }) {
 function ErrorPanel({ detail }: { detail: string }) {
   return (
     <section className="mt-5" role="alert">
-      <h2 className="mb-2 text-sm font-semibold text-red-700">
-        LIFF init failed
-      </h2>
-      {/* select-all so one tap grabs the whole message on a phone; break-words
-          so long stack frames wrap instead of forcing a horizontal scroll. */}
+      <h2 className="mb-2 text-sm font-semibold text-red-700">LIFF init failed</h2>
       <pre className="select-all whitespace-pre-wrap break-words rounded-xl bg-red-50 p-3 font-mono text-xs leading-relaxed text-red-900">
         {detail}
       </pre>
@@ -183,48 +277,32 @@ function ErrorPanel({ detail }: { detail: string }) {
   );
 }
 
-function ProfileCard({ profile }: { profile: LiffProfile }) {
-  return (
-    <section>
-      <h2 className="mb-1 text-sm font-semibold">Profile</h2>
-      <div className="flex items-center gap-3 py-3">
-        {profile.pictureUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element -- next/image
-             would need images.remotePatterns for LINE's CDN, and a wrong guess
-             at that host would break this screen. A plain img keeps the
-             diagnostic free of config that can itself fail. */
-          <img
-            src={profile.pictureUrl}
-            alt=""
-            width={64}
-            height={64}
-            className="size-16 shrink-0 rounded-full bg-black/5 object-cover"
-          />
-        ) : (
-          <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-black/5 text-[10px] text-black/40">
-            none
-          </div>
-        )}
-        <div className="min-w-0">
-          <p className="truncate text-base font-medium">
-            {profile.displayName}
-          </p>
-          <p className="text-xs text-black/50">displayName</p>
-        </div>
-      </div>
-      <dl>
-        <Row label="userId" value={profile.userId} />
-        <Row label="pictureUrl" value={profile.pictureUrl ?? "(none)"} />
-      </dl>
-    </section>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value, good }: { label: string; value: string; good?: boolean }) {
   return (
     <div className="border-t border-black/10 py-3">
       <dt className="text-xs text-black/50">{label}</dt>
-      <dd className="mt-0.5 break-all font-mono text-sm">{value}</dd>
+      <dd className={`mt-0.5 break-all font-mono text-sm ${good ? "text-green-700" : ""}`}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function RowBlock({ label, detail, bad }: { label: string; detail: string; bad?: boolean }) {
+  return (
+    <div className="border-t border-black/10 py-3">
+      <dt className={`text-xs ${bad ? "text-red-700" : "text-black/50"}`}>
+        {label} — unavailable
+      </dt>
+      <dd className="mt-1">
+        <pre
+          className={`select-all whitespace-pre-wrap break-words rounded-lg p-2.5 font-mono text-xs leading-relaxed ${
+            bad ? "bg-red-50 text-red-900" : "bg-black/[0.04] text-black/70"
+          }`}
+        >
+          {detail}
+        </pre>
+      </dd>
     </div>
   );
 }
