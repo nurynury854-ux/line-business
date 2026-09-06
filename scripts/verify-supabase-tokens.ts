@@ -101,6 +101,35 @@ async function main() {
       : `LEAKED: ${walledOff.join(", ")}`,
   );
 
+  // --- the tenant is actually pointed at a real LINE app --------------------
+  // Cheap to check and expensive to miss: a placeholder channel id makes every
+  // booking fail with a 401 that looks like a token problem, not a config one.
+  const liveIds = await asLookup
+    .from("tenants")
+    .select("liff_id, line_login_channel_id")
+    .eq("slug", DEMO_SLUG)
+    .maybeSingle();
+
+  const channelId = liveIds.data?.line_login_channel_id ?? "";
+  const liffId = liveIds.data?.liff_id ?? "";
+
+  check(
+    "tenant line_login_channel_id is set (not the placeholder)",
+    Boolean(channelId) && channelId !== "REPLACE_ME_LOGIN_CHANNEL_ID",
+    `value: ${channelId || "(null)"}`,
+  );
+  check(
+    "tenant liff_id is set",
+    Boolean(liffId),
+    `value: ${liffId || "(null)"}`,
+  );
+  // A LIFF id is "<login channel id>-<suffix>", so these must agree.
+  check(
+    "liff_id's numeric prefix matches line_login_channel_id",
+    liffId.split("-")[0] === channelId,
+    `${liffId.split("-")[0] || "?"} vs ${channelId || "?"}`,
+  );
+
   // --- the INVARIANT the isolation rests on ---------------------------------
   // The probe above tests behaviour. This tests the structural fact behind it:
   // if a tenant_id claim ever appears in this token, every 0001 policy is
