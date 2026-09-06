@@ -105,6 +105,20 @@ export default function BookingFlow({
     [tenant.services, serviceId],
   );
 
+  // KNOWN DIVERGENCE — this side reads CONFIG; the slot grid reads the DATABASE.
+  //
+  // buildDateOptions and isSalonOpen below derive the 14 days and each day's
+  // open/closed state from config/tenants/demo.ts, while the times inside a day
+  // come from GET /api/availability, which reads business_hours and
+  // closed_dates. They agree today only because the seed mirrors the config.
+  //
+  // Change business hours in one place and the two disagree visibly: a day
+  // offered as open that then has no bookable times, or a day greyed out as
+  // closed that the server would happily accept a booking for.
+  //
+  // Accepted deliberately, not an oversight. The fix is this page resolving its
+  // tenant from the database. Matching note in src/app/api/availability/route.ts
+  // and in CLAUDE.md under "Known divergences".
   const days = useMemo(() => (now ? buildDateOptions(tenant, now) : []), [tenant, now]);
 
   const staffName =

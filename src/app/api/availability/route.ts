@@ -21,6 +21,19 @@ import {
  * customer, no booking id, no stylist assignment.
  *
  * Availability is public information in any booking system; who booked is not.
+ *
+ *
+ * KNOWN DIVERGENCE — this side reads the DATABASE; the date picker reads CONFIG.
+ *
+ * The times within a day come from business_hours and closed_dates here, but
+ * the 14 days themselves, and whether each is open, come from
+ * config/tenants/demo.ts in BookingFlow. They agree today only because the seed
+ * mirrors the config.
+ *
+ * If you change a salon's hours or closures, change BOTH or the date picker and
+ * this endpoint will contradict each other. Accepted deliberately for now;
+ * matching note in src/components/booking/booking-flow.tsx and in CLAUDE.md
+ * under "Known divergences".
  */
 
 export const runtime = "nodejs";

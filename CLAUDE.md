@@ -44,7 +44,7 @@ Isolation model: **shared tables + Postgres Row Level Security.**
 - Verification means checking signature, `aud` (our channel ID), `iss`, and `exp`. Never decode without verifying.
 - The `sub` claim from the *verified* token is the only acceptable source of a LINE user ID. A handler that reads a user ID from the request body, a query param, or client state is a bug.
 - `liff.getProfile()` output is display data only — name and avatar for the UI. It is never an authorization input.
-- Treat **`(tenant_id, line_user_id)`** as the user identity key, never `line_user_id` alone. This is load-bearing, not defensive: with one Login channel per salon, the same physical person genuinely has a different `sub` at each salon, because LINE user IDs are unique only within a channel.
+- Treat **`(tenant_id, line_user_id)`** as the user identity key, never `line_user_id` alone. This is load-bearing, not defensive: **a LINE user ID is scoped to the Provider**, so the same physical person genuinely has a different `sub` at each salon, because each salon has its own Provider. Channels under one Provider share a user's ID; different Providers do not.
 - The expected **`aud` comes from `tenants.line_login_channel_id`** for the resolved tenant, read per request — never from an env var. A global channel id is wrong for every salon but one, and checking `aud` is exactly what stops Salon A's token from being replayed against Salon B.
 - **Resolve the tenant before verifying**, because its channel id is what you verify against: resolve tenant from the request → read `line_login_channel_id` → verify the token against that `aud` → take `sub`. Reject early if the tenant does not resolve. The tenant identifier arrives unverified from the client, and that is fine — it only selects which `aud` to check, and a wrong guess makes verification fail. Do not "harden" this into something that breaks it.
 
@@ -102,9 +102,15 @@ Note: tenant-specific copy (section 5) is tenant *data*, not translation strings
 ## Settled decisions
 
 - **LINE channel topology: one Login channel per salon**, under a Provider in that salon's legal name. This follows LINE's policy for agency integrations, so it is not a free choice. Consequences: `liff_id` and `line_login_channel_id` are per-tenant columns and never env vars, and onboarding a salon means a new Provider, two channels, and a LIFF app.
+- **A salon's Messaging API channel MUST sit under that salon's own Provider**, alongside its Login channel. User IDs are Provider-scoped, so a Messaging API channel under a different Provider cannot push to the `sub` the booking route verified — the id identifies nobody there. This is an onboarding-time constraint that is invisible until a confirmation message silently fails to arrive.
+- **Pushing to a customer requires them to have added that salon's official account as a friend.** LIFF's bot link feature prompts this during login; without it, a customer can book successfully and receive nothing.
 - **Tenancy: shared tables with RLS.** RLS is a backstop. The primary defence is the route verifying a LINE ID token, then minting a short-lived Supabase JWT (HS256, secret used as its UTF-8 string) whose claims the policies read. That JWT never reaches the browser.
 - **Booking statuses:** `confirmed` / `cancelled` / `completed` / `no_show`. Adding `pending` later is anticipated — see the comment on the `bookings_status_valid` constraint.
 - **Currency renders via the locale layer** (`$800` for TWD in zh-Hant-TW), not hand-built strings.
+
+## Known divergences
+
+- **The date picker reads tenant config; the slot grid reads the database.** `BookingFlow` derives its 14 days and open/closed state from `config/tenants/demo.ts` via `buildDateOptions`/`isSalonOpen`, while `GET /api/availability` derives slots from `business_hours` and `closed_dates`. They agree today only because the seed mirrors the config. Change business hours in one place and the date picker and the slot grid will disagree — a day shown as open with no bookable times, or shown closed while the server would accept a booking. Accepted deliberately for now; fixing it means the booking page resolving its tenant from the database.
 
 ## Repo status
 
