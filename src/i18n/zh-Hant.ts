@@ -99,6 +99,8 @@ export const messages = {
   "admin.revenue": "預估營收 {amount}",
   "admin.customerUnknown": "未提供姓名",
   "admin.customer": "客人",
+  "admin.expired": "LINE 登入已過期，請重新登入後再查看預約。",
+  "admin.relogin": "重新登入 LINE",
 
   "weekday.0": "週日",
   "weekday.1": "週一",

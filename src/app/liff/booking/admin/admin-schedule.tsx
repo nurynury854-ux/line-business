@@ -22,7 +22,9 @@ type State =
   | { status: "redirecting" }
   | { status: "ready"; bookings: Booking[] }
   | { status: "denied" }
-  | { status: "error"; message: string };
+  /** The ID token LIFF handed us was rejected — almost always an expired one. */
+  | { status: "expired"; detail: string }
+  | { status: "error"; message: string; detail?: string };
 
 let liffPromise: Promise<typeof import("@line/liff").default> | null = null;
 function loadLiff(liffId: string) {
@@ -105,8 +107,25 @@ export default function AdminSchedule({
           setState({ status: "denied" });
           return;
         }
+
         if (!response.ok) {
-          setState({ status: "error", message: t("admin.error") });
+          const payload = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            detail?: unknown;
+          };
+          const detail = `HTTP ${response.status} — ${payload.error ?? "(no message)"}${
+            payload.detail ? `\n${typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail)}` : ""
+          }`;
+
+          // liff.getIDToken() returns the token minted at LOGIN, and it expires.
+          // Opening this page in an older LIFF session hands over a stale token
+          // that LINE then rejects — which is a re-login, not a failure.
+          if (response.status === 401) {
+            setState({ status: "expired", detail });
+            return;
+          }
+
+          setState({ status: "error", message: t("admin.error"), detail });
           return;
         }
 
@@ -174,11 +193,40 @@ export default function AdminSchedule({
           </p>
         )}
 
+        {state.status === "expired" && (
+          <div>
+            <p role="alert" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm leading-relaxed text-amber-900">
+              {t("admin.expired")}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (!liffId) return;
+                void loadLiff(liffId).then((liff) =>
+                  liff.login({ redirectUri: window.location.href }),
+                );
+              }}
+              className="min-h-14 w-full rounded-xl text-base font-semibold text-white active:opacity-80"
+              style={{ backgroundColor: "var(--brand-primary)" }}
+            >
+              {t("admin.relogin")}
+            </button>
+            <pre className="mt-3 select-all whitespace-pre-wrap break-words rounded-lg bg-black/[0.04] p-2.5 font-mono text-[11px] leading-relaxed text-black/60">
+              {state.detail}
+            </pre>
+          </div>
+        )}
+
         {state.status === "error" && (
           <div>
             <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-900">
               {state.message}
             </p>
+            {state.detail && (
+              <pre className="mb-3 select-all whitespace-pre-wrap break-words rounded-lg bg-red-50 p-2.5 font-mono text-[11px] leading-relaxed text-red-900">
+                {state.detail}
+              </pre>
+            )}
             <button
               type="button"
               onClick={() => void load(range)}
