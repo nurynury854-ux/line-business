@@ -110,6 +110,21 @@ export async function mintTenantReadToken(tenantId: string): Promise<string> {
 }
 
 /**
+ * Token for the scheduled reminder job.
+ *
+ * Carries no tenant and no user — a `job` claim only. It unlocks nothing
+ * through RLS: its sole power is satisfying the internal gate on
+ * reminders_due() and reminders_mark_sent(), which return exactly what a batch
+ * push needs and nothing else.
+ *
+ * Minted only inside the cron route, which is itself behind CRON_SECRET. The
+ * claim is not the security boundary; that secret is.
+ */
+export async function mintReminderJobToken(): Promise<string> {
+  return mint({ job: "reminders" });
+}
+
+/**
  * Phase two: the real request token, minted only AFTER LINE has verified the ID
  * token. `lineUserId` must be the `sub` of the verified token — never a value
  * the client supplied (CLAUDE.md §3).

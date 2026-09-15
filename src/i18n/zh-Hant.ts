@@ -83,6 +83,12 @@ export const messages = {
   "notify.confirm.reassigned": "您選擇不指定設計師，已為您安排當日可服務的設計師。",
   "notify.confirm.changeNotice": "如需更改或取消預約，請直接與店家聯繫。",
   "notify.confirm.reference": "預約編號 {reference}",
+
+  // Pushed the evening before the appointment.
+  "notify.reminder.altText": "明天預約提醒：{time}・{service}",
+  "notify.reminder.title": "明天預約提醒",
+  "notify.reminder.lead": "提醒您，明天有一筆預約：",
+  "notify.reminder.changeNotice": "如需更改或取消，請儘早與店家聯繫，以便安排其他客人。",
   "booking.done.reassigned": "原設計師已額滿，已為您安排其他可服務的設計師。",
 
   // Salon-owner view.

@@ -29,10 +29,25 @@ for (const raw of fs.existsSync(path.join(process.cwd(), ".env.local"))
 }
 
 import { buildBookingConfirmationMessage } from "@/lib/line/booking-confirmation";
+import { buildBookingReminderMessage } from "@/lib/line/booking-reminder";
 import { pushToLineUser } from "@/lib/line/push";
 
 async function main() {
-  const message = buildBookingConfirmationMessage({
+  // Which card to preview: `npx tsx scripts/send-test-push.ts reminder`
+  const which = process.argv[2] === "reminder" ? "reminder" : "confirmation";
+
+  const message = which === "reminder"
+    ? buildBookingReminderMessage({
+        tenantName: "沐光髮藝",
+        brandPrimary: "#1f5f4e",
+        serviceName: "洗剪吹",
+        staffName: "小雨",
+        // Tomorrow at 14:00 Taipei, so the card reads as a real reminder.
+        startsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        durationMinutes: 60,
+        priceTwd: 800,
+      })
+    : buildBookingConfirmationMessage({
     tenantName: "沐光髮藝",
     brandPrimary: "#1f5f4e",
     serviceName: "洗剪吹",
@@ -44,6 +59,8 @@ async function main() {
     bookingId: "3f9a1c2e-7b4d-4e8a-9c1f-2d5e6f7a8b9c",
     wasReassigned: true,
   });
+
+  console.log(`card: ${which}`);
 
   // Structural sanity against LINE's documented limits.
   const json = JSON.stringify(message);

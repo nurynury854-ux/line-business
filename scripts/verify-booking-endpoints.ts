@@ -132,6 +132,15 @@ async function main() {
   check("admin verifies the id token before checking membership",
     (await adminPost({ tenantSlug: SLUG, idToken: "not-a-real-token" })).status === 401);
 
+  // The reminder cron sends real messages to real customers. An open endpoint is
+  // a spam cannon, so anything other than 401/503 here is a serious regression.
+  const cron = await fetch(`${BASE_URL}/api/cron/reminders`);
+  check(
+    "reminder cron is not publicly triggerable",
+    cron.status === 401 || cron.status === 503,
+    `HTTP ${cron.status} (401 = secret set and enforced, 503 = no secret configured)`,
+  );
+
   console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILED`);
   process.exit(failures === 0 ? 0 : 1);
 }
