@@ -90,13 +90,18 @@ export default function AdminSchedule({
 
         // Refreshes automatically when the login-time token has expired, so the
         // owner is never asked to re-login by hand on a normal morning.
-        const token = acquireFreshIdToken(liff, window.location.href);
+        const token = acquireFreshIdToken(liff);
         if (token.status === "redirecting") {
           setState({ status: "redirecting" });
           return;
         }
         if (token.status === "unavailable") {
-          setState({ status: "error", message: t("admin.needLogin"), detail: token.reason });
+          const isScopeProblem = token.reason.includes("openid");
+          setState({
+            status: "error",
+            message: isScopeProblem ? t("admin.needLogin") : t("admin.openInLine"),
+            detail: token.reason,
+          });
           return;
         }
         const idToken = token.idToken;

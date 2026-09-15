@@ -64,6 +64,7 @@ export const messages = {
   "booking.error.network": "連線失敗，請確認網路後再試一次。",
   "booking.error.generic": "預約失敗，請稍後再試。",
   "booking.error.needLogin": "請先登入 LINE 再送出預約。",
+  "booking.error.openInLine": "請在 LINE 應用程式中開啟此頁面後再預約。瀏覽器可能封鎖了 LINE 登入所需的資料。",
 
   "booking.done.reference": "預約編號",
   "booking.done.notified": "預約確認已傳送到您的 LINE。",
@@ -101,6 +102,7 @@ export const messages = {
   "admin.customer": "客人",
   "admin.expired": "LINE 登入已過期，請重新登入後再查看預約。",
   "admin.relogin": "重新登入 LINE",
+  "admin.openInLine": "請在 LINE 應用程式中開啟此頁面。瀏覽器可能封鎖了 LINE 登入所需的資料。",
 
   "weekday.0": "週日",
   "weekday.1": "週一",

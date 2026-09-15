@@ -178,13 +178,22 @@ export default function BookingFlow({
       // Covers both "never logged in" and "logged in long enough ago that the
       // token has expired" — the latter previously surfaced as a generic
       // failure at the last tap of the flow, after all five steps.
-      const token = acquireFreshIdToken(liff, window.location.href);
+      const token = acquireFreshIdToken(liff);
       if (token.status === "redirecting") {
         setSubmit({ status: "redirecting" });
         return;
       }
       if (token.status === "unavailable") {
-        setSubmit({ status: "error", message: t("booking.error.needLogin"), wasConflict: false });
+        // Distinguishes "this LIFF app is misconfigured" from "this browser
+        // cannot hold a LINE session" — only the second has a user-side fix.
+        const isScopeProblem = token.reason.includes("openid");
+        setSubmit({
+          status: "error",
+          wasConflict: false,
+          message: isScopeProblem
+            ? t("booking.error.needLogin")
+            : t("booking.error.openInLine"),
+        });
         return;
       }
       const idToken = token.idToken;
