@@ -20,10 +20,28 @@ function required(name: string): string {
   return value;
 }
 
+/** For features that degrade gracefully when unconfigured. */
+function optional(name: string): string | undefined {
+  const value = process.env[name];
+  return value ? value : undefined;
+}
+
 export const serverEnv = {
   supabaseUrl: () => required("NEXT_PUBLIC_SUPABASE_URL"),
   supabaseAnonKey: () => required("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
   supabaseJwtSecret: () => required("SUPABASE_JWT_SECRET"),
+
+  /**
+   * SINGLE-TENANT SHORTCUT. With one Messaging API channel per salon this is
+   * tenant data, exactly like line_login_channel_id — but unlike that value it
+   * is a SECRET, and tenants rows are readable by every request token for that
+   * tenant. So it cannot simply become a tenants column; it needs a store our
+   * request path can reach but a tenant-scoped read cannot. Until that exists,
+   * this env var serves the one demo tenant. Optional: absent means bookings
+   * still succeed and the confirmation is skipped, never that booking fails.
+   */
+  lineMessagingChannelAccessToken: () =>
+    optional("LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"),
 };
 
 // There is deliberately no accessor for a LINE Login channel id. With one

@@ -34,7 +34,13 @@ type SubmitState =
   | { status: "submitting" }
   | { status: "redirecting" }
   | { status: "error"; message: string; wasConflict: boolean }
-  | { status: "success"; bookingId: string; reassigned: boolean };
+  | {
+      status: "success";
+      bookingId: string;
+      reassigned: boolean;
+      /** What happened to the LINE confirmation. The booking stands regardless. */
+      notification: "sent" | "failed" | "skipped";
+    };
 
 /**
  * LIFF is initialised once per page load and cached at module scope: liff.init()
@@ -193,6 +199,7 @@ export default function BookingFlow({
       const payload = (await response.json().catch(() => ({}))) as {
         booking?: { id: string };
         reassigned?: boolean;
+        notification?: { status: "sent" | "failed" | "skipped" };
       };
 
       if (response.status === 201 && payload.booking) {
@@ -200,6 +207,7 @@ export default function BookingFlow({
           status: "success",
           bookingId: payload.booking.id,
           reassigned: Boolean(payload.reassigned),
+          notification: payload.notification?.status ?? "skipped",
         });
         return;
       }
@@ -260,6 +268,7 @@ export default function BookingFlow({
           <SuccessPanel
             bookingId={submit.bookingId}
             reassigned={submit.reassigned}
+            notification={submit.notification}
             service={service}
             staffName={staffName}
             date={date}
@@ -438,6 +447,7 @@ function Notice({ tone, children }: { tone: "error" | "warning"; children: React
 function SuccessPanel({
   bookingId,
   reassigned,
+  notification,
   service,
   staffName,
   date,
@@ -445,6 +455,7 @@ function SuccessPanel({
 }: {
   bookingId: string;
   reassigned: boolean;
+  notification: "sent" | "failed" | "skipped";
   service: { name: string; priceTwd: number } | null;
   staffName: string;
   date: string | null;
@@ -460,6 +471,21 @@ function SuccessPanel({
         ✓
       </div>
       <h1 className="text-center text-lg font-semibold">{t("booking.done.title")}</h1>
+
+      {/* Lead with where the confirmation went. "failed" is the one case that
+          asks the customer to do something (keep a screenshot), so it is the
+          only one styled as a warning. */}
+      <p
+        className={`mt-2 text-center text-sm leading-relaxed ${
+          notification === "failed" ? "rounded-lg bg-amber-50 px-3 py-2 text-amber-900" : "text-black/60"
+        }`}
+      >
+        {notification === "sent"
+          ? t("booking.done.notified")
+          : notification === "failed"
+            ? t("booking.done.notifyFailed")
+            : t("booking.done.notifySkipped")}
+      </p>
 
       {reassigned && (
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">

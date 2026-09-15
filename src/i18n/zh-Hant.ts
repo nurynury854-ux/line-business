@@ -66,6 +66,22 @@ export const messages = {
   "booking.error.needLogin": "請先登入 LINE 再送出預約。",
 
   "booking.done.reference": "預約編號",
+  "booking.done.notified": "預約確認已傳送到您的 LINE。",
+  "booking.done.notifyFailed": "預約已成立，但確認訊息傳送失敗。請將此畫面截圖留存。",
+  "booking.done.notifySkipped": "預約已成立。",
+
+  // Pushed to the customer's LINE chat after a successful booking.
+  "notify.confirm.altText": "預約確認：{date} {time}・{service}",
+  "notify.confirm.title": "預約成功",
+  "notify.confirm.service": "服務項目",
+  "notify.confirm.staff": "設計師",
+  "notify.confirm.date": "日期",
+  "notify.confirm.time": "時間",
+  "notify.confirm.duration": "所需時間",
+  "notify.confirm.price": "金額",
+  "notify.confirm.reassigned": "您選擇不指定設計師，已為您安排當日可服務的設計師。",
+  "notify.confirm.changeNotice": "如需更改或取消預約，請直接與店家聯繫。",
+  "notify.confirm.reference": "預約編號 {reference}",
   "booking.done.reassigned": "原設計師已額滿，已為您安排其他可服務的設計師。",
 
   "weekday.0": "週日",

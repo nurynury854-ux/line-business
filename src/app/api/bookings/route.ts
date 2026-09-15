@@ -5,6 +5,10 @@ import {
   verifyLineIdToken,
 } from "@/lib/line/verify-id-token";
 import { createRequestScopedClient } from "@/lib/supabase/client";
+import { serverEnv } from "@/lib/env";
+import { pushToLineUser, type PushOutcome } from "@/lib/line/push";
+import { buildBookingConfirmationMessage } from "@/lib/line/booking-confirmation";
+import { t } from "@/i18n";
 import { mintSessionToken, mintTenantLookupToken } from "@/lib/supabase/tokens";
 import {
   type ExistingBooking,
@@ -120,7 +124,7 @@ export async function POST(request: Request) {
   const { data: tenant, error: tenantError } = await lookupClient
     .from("tenants")
     .select(
-      "id, slug, line_login_channel_id, slot_interval_minutes, minimum_lead_time_minutes, booking_window_days",
+      "id, slug, name, brand, line_login_channel_id, slot_interval_minutes, minimum_lead_time_minutes, booking_window_days",
     )
     .eq("slug", tenantSlug)
     .maybeSingle();
@@ -208,11 +212,14 @@ export async function POST(request: Request) {
 
   const { data: staffRows } = await client
     .from("staff")
-    .select("id")
+    .select("id, name")
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
 
   const activeStaffIds = (staffRows ?? []).map((row) => row.id as string);
+  const staffNameById = new Map(
+    (staffRows ?? []).map((row) => [row.id as string, row.name as string]),
+  );
   if (activeStaffIds.length === 0) return fail(422, "This salon has no bookable staff.");
 
   // --- resolve which stylist actually takes the booking -------------------
@@ -277,11 +284,33 @@ export async function POST(request: Request) {
     });
 
     if (!error && created) {
+      const wasReassigned = staffId === ANY_STAFF && index > 0;
+
+      // The booking is committed. Everything from here is best-effort: a failed
+      // or skipped notification is reported to the client, never turned into a
+      // non-201, because the slot is genuinely held either way.
+      const notification = await notifyCustomer({
+        to: identity.lineUserId,
+        tenantName: tenant.name as string,
+        brandPrimary:
+          ((tenant.brand as { primary?: string } | null)?.primary) ?? "#222222",
+        serviceName: service.name,
+        staffName: staffNameById.get(candidateStaffId) ?? t("booking.staff.any"),
+        date,
+        time,
+        durationMinutes: service.duration_minutes,
+        priceTwd: service.price_twd,
+        bookingId: created.id as string,
+        wasReassigned,
+      });
+
       return NextResponse.json(
         {
           booking: created,
           service: { id: service.id, name: service.name },
-          reassigned: index > 0,
+          staff: { id: candidateStaffId, name: staffNameById.get(candidateStaffId) ?? null },
+          reassigned: wasReassigned,
+          notification,
         },
         { status: 201 },
       );
@@ -324,4 +353,30 @@ async function insertBooking(
     })
     .select("id, starts_at, ends_at, staff_id, service_id, status, price_twd, duration_minutes")
     .single();
+}
+
+type NotificationOutcome = PushOutcome | { status: "skipped"; detail: string };
+
+/**
+ * Sends the confirmation to the customer's LINE chat.
+ *
+ * "skipped" means we never tried — no channel token configured. "failed" means
+ * LINE refused or did not answer; the most common cause is the customer not
+ * having added this salon's official account, which LINE reports as a 400.
+ * Neither is the caller's problem to retry: the booking stands.
+ */
+async function notifyCustomer(
+  input: Parameters<typeof buildBookingConfirmationMessage>[0] & { to: string },
+): Promise<NotificationOutcome> {
+  const channelAccessToken = serverEnv.lineMessagingChannelAccessToken();
+  if (!channelAccessToken) {
+    return { status: "skipped", detail: "LINE_MESSAGING_CHANNEL_ACCESS_TOKEN is not set" };
+  }
+
+  const { to, ...content } = input;
+  return pushToLineUser({
+    channelAccessToken,
+    to,
+    messages: [buildBookingConfirmationMessage(content)],
+  });
 }
