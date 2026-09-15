@@ -110,7 +110,21 @@ Note: tenant-specific copy (section 5) is tenant *data*, not translation strings
 
 ## Known divergences
 
-- **The date picker reads tenant config; the slot grid reads the database.** `BookingFlow` derives its 14 days and open/closed state from `config/tenants/demo.ts` via `buildDateOptions`/`isSalonOpen`, while `GET /api/availability` derives slots from `business_hours` and `closed_dates`. They agree today only because the seed mirrors the config. Change business hours in one place and the date picker and the slot grid will disagree — a day shown as open with no bookable times, or shown closed while the server would accept a booking. Accepted deliberately for now; fixing it means the booking page resolving its tenant from the database.
+None outstanding. The booking page loads its tenant, services, staff, hours and
+closures from the database via `src/lib/tenants/load.ts`, so the UI and the API
+routes share one source of truth.
+
+**Nothing in a request path may import `config/tenants/*`.** That file is the
+seed's source of truth and the oracle for `scripts/verify-slots.ts`, nothing
+more. When the page rendered from it, the UI offered `serviceId: "cut"` while
+the database held a uuid — every availability call returned 400 and no booking
+could succeed. Unit tests, the parity suite and manual curl checks all passed
+throughout, because every one of them used ids copied from the seed rather than
+the ids a customer's screen produces.
+
+`scripts/verify-booking-endpoints.ts` is the guard against that returning: it
+takes ids from the same loader the page uses and sends them to the real
+endpoints. Any test that hardcodes an id cannot catch this class of bug.
 
 ## Repo status
 

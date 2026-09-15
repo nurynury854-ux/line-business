@@ -1,21 +1,37 @@
-import { demoTenant } from "@config/tenants/demo";
+import { notFound } from "next/navigation";
 import BookingFlow from "@/components/booking/booking-flow";
+import { loadTenantBySlug } from "@/lib/tenants/load";
 
 /**
- * The tenant is still the hardcoded demo config. Once tenants are resolved from
- * the route, this becomes a lookup and BookingFlow needs no change — it already
- * takes the whole config as a prop (CLAUDE.md §5).
+ * Renders the booking flow from DATABASE rows, not from tenant config.
  *
- * liffId comes from the environment for now. With one LIFF app per salon it is
- * tenant data, so the real source is tenants.liff_id — which this page will read
- * once it resolves the tenant from the database.
+ * This page must never import config/tenants/*. The UI's service and staff ids
+ * have to be the ids the API routes look up, and the only way to guarantee that
+ * is for both to come from the same place. They previously did not, and every
+ * availability request returned 400.
+ *
+ * The slug is hardcoded until tenants are resolved from the route. That is the
+ * ONE remaining piece of tenant identity in code, and swapping it for a route
+ * segment is all that stands between this and true multi-tenancy.
  */
-export default function BookingPage() {
+
+const TENANT_SLUG = "demo";
+
+// Reads per request: tenant data changes without a redeploy, and the build must
+// not try to reach the database.
+export const dynamic = "force-dynamic";
+
+export default async function BookingPage() {
+  const loaded = await loadTenantBySlug(TENANT_SLUG);
+  if (!loaded) notFound();
+
   return (
     <BookingFlow
-      tenant={demoTenant}
-      tenantSlug="demo"
-      liffId={process.env.NEXT_PUBLIC_LIFF_ID}
+      tenant={loaded.tenant}
+      tenantSlug={TENANT_SLUG}
+      // From tenants.liff_id, so each salon boots its own LIFF app. The env var
+      // is only a fallback while a tenant row may not have one set yet.
+      liffId={loaded.liffId ?? process.env.NEXT_PUBLIC_LIFF_ID}
     />
   );
 }
