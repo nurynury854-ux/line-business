@@ -10,7 +10,7 @@
  * it actually sends.
  *
  * LINE_TEST_USER_ID must be a `sub` from THIS salon's Login channel — the value
- * shown as "token sub" on /liff/diagnostics. Provider-scoped, so a userId from
+ * shown as "token sub" on /liff/booking/diagnostics. Provider-scoped, so a userId from
  * anywhere else identifies nobody here.
  */
 import fs from "node:fs";
