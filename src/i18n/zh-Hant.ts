@@ -84,6 +84,22 @@ export const messages = {
   "notify.confirm.reference": "預約編號 {reference}",
   "booking.done.reassigned": "原設計師已額滿，已為您安排其他可服務的設計師。",
 
+  // Salon-owner view.
+  "admin.title": "預約管理",
+  "admin.range.today": "今天",
+  "admin.range.week": "未來七天",
+  "admin.loading": "載入預約中…",
+  "admin.error": "無法載入預約，請重新整理。",
+  "admin.retry": "重新載入",
+  "admin.empty.today": "今天目前沒有預約。",
+  "admin.empty.week": "未來七天目前沒有預約。",
+  "admin.notAdmin": "此 LINE 帳號沒有本店的管理權限。",
+  "admin.needLogin": "請先登入 LINE。",
+  "admin.count": "共 {count} 筆預約",
+  "admin.revenue": "預估營收 {amount}",
+  "admin.customerUnknown": "未提供姓名",
+  "admin.customer": "客人",
+
   "weekday.0": "週日",
   "weekday.1": "週一",
   "weekday.2": "週二",

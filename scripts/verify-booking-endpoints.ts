@@ -117,6 +117,21 @@ async function main() {
     `HTTP ${clean.status} ${cleanBody.error ?? ""}`,
   );
 
+  // Admin route: the auth ordering must hold before any data is touched.
+  const adminPost = (payload: Record<string, unknown>) =>
+    fetch(`${BASE_URL}/api/admin/bookings`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+  check("admin rejects a missing id token", (await adminPost({ tenantSlug: SLUG })).status === 400);
+  check("admin rejects an unknown tenant",
+    (await adminPost({ tenantSlug: "no-such-salon", idToken: "x" })).status === 404);
+  // 401 proves verification runs BEFORE any admin lookup -- an unverified caller
+  // must never reach the membership check, let alone customer rows.
+  check("admin verifies the id token before checking membership",
+    (await adminPost({ tenantSlug: SLUG, idToken: "not-a-real-token" })).status === 401);
+
   console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILED`);
   process.exit(failures === 0 ? 0 : 1);
 }
