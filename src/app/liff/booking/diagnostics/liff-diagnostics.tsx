@@ -232,21 +232,49 @@ export default function LiffDiagnostics() {
   );
 }
 
-/** The one line worth reading first: can this device book or not? */
+/**
+ * The one line worth reading first: can this device book or not?
+ *
+ * Expiry is part of the answer. A present-but-expired token is rejected by LINE
+ * with a 401, so reporting it as green would be a lie — and was, until an expired
+ * token on the admin page showed green here while every request failed.
+ */
 function Verdict({ report }: { report: Report }) {
-  const canBook = report.idToken.state === "ok";
+  const hasToken = report.idToken.state === "ok";
+  const remaining = report.idToken.state === "ok" ? report.idToken.value.expiresInSeconds : undefined;
+  const expired = remaining !== undefined && remaining <= 0;
+
+  const tone = !hasToken
+    ? "bad"
+    : expired
+      ? "warn"
+      : "good";
+
+  const palette = {
+    good: "border-green-200 bg-green-50 text-green-900",
+    warn: "border-amber-200 bg-amber-50 text-amber-900",
+    bad: "border-red-200 bg-red-50 text-red-900",
+  }[tone];
+
+  const headline = {
+    good: "Booking should work.",
+    warn: "Token expired — pages will refresh it automatically.",
+    bad: "Booking will NOT work.",
+  }[tone];
+
+  const body = {
+    good: "LIFF initialised and a valid ID token is available, which is all the booking flow needs.",
+    warn:
+      `The ID token expired ${Math.abs(remaining ?? 0)}s ago. liff.getIDToken() returns the token ` +
+      "minted at login, so an older session hands over a stale one. The booking and admin pages " +
+      "detect this and re-login on their own; this screen deliberately does not, so it reports " +
+      "the real state.",
+    bad: "LIFF initialised but no ID token is available, so the server cannot establish identity.",
+  }[tone];
+
   return (
-    <section
-      className={`rounded-xl border p-3 text-sm leading-relaxed ${
-        canBook
-          ? "border-green-200 bg-green-50 text-green-900"
-          : "border-red-200 bg-red-50 text-red-900"
-      }`}
-    >
-      <strong>{canBook ? "Booking should work." : "Booking will NOT work."}</strong>{" "}
-      {canBook
-        ? "LIFF initialised and an ID token is available, which is all the booking flow needs."
-        : "LIFF initialised but no ID token is available, so the server cannot establish identity."}
+    <section className={`rounded-xl border p-3 text-sm leading-relaxed ${palette}`}>
+      <strong>{headline}</strong> {body}
     </section>
   );
 }

@@ -6,6 +6,7 @@ import type { TenantConfig } from "@config/tenants/types";
 import { ANY_STAFF, type StaffSelection, buildDateOptions, isSalonOpen } from "@/lib/booking/slots";
 import { t } from "@/i18n";
 import { formatDateLong, formatPriceTwd } from "@/i18n/format";
+import { acquireFreshIdToken } from "@/lib/liff/id-token";
 import { ConfirmStep, DateStep, ServiceStep, StaffStep, TimeStep } from "./steps";
 
 const STEPS = ["service", "staff", "date", "time", "confirm"] as const;
@@ -174,18 +175,19 @@ export default function BookingFlow({
     try {
       const liff = await loadLiff(liffId);
 
-      if (!liff.isLoggedIn()) {
+      // Covers both "never logged in" and "logged in long enough ago that the
+      // token has expired" — the latter previously surfaced as a generic
+      // failure at the last tap of the flow, after all five steps.
+      const token = acquireFreshIdToken(liff, window.location.href);
+      if (token.status === "redirecting") {
         setSubmit({ status: "redirecting" });
-        liff.login({ redirectUri: window.location.href });
         return;
       }
-
-      const idToken = liff.getIDToken();
-      if (!idToken) {
-        // Almost always a missing `openid` scope on the LIFF app.
+      if (token.status === "unavailable") {
         setSubmit({ status: "error", message: t("booking.error.needLogin"), wasConflict: false });
         return;
       }
+      const idToken = token.idToken;
 
       const response = await fetch("/api/bookings", {
         method: "POST",

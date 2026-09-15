@@ -4,6 +4,7 @@ import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import { t } from "@/i18n";
 import { formatPriceTwd } from "@/i18n/format";
 import { TAIPEI_TIME_ZONE } from "@/lib/time/taipei";
+import { acquireFreshIdToken } from "@/lib/liff/id-token";
 
 type Booking = {
   id: string;
@@ -86,16 +87,19 @@ export default function AdminSchedule({
       }
       try {
         const liff = await loadLiff(liffId);
-        if (!liff.isLoggedIn()) {
+
+        // Refreshes automatically when the login-time token has expired, so the
+        // owner is never asked to re-login by hand on a normal morning.
+        const token = acquireFreshIdToken(liff, window.location.href);
+        if (token.status === "redirecting") {
           setState({ status: "redirecting" });
-          liff.login({ redirectUri: window.location.href });
           return;
         }
-        const idToken = liff.getIDToken();
-        if (!idToken) {
-          setState({ status: "error", message: t("admin.needLogin") });
+        if (token.status === "unavailable") {
+          setState({ status: "error", message: t("admin.needLogin"), detail: token.reason });
           return;
         }
+        const idToken = token.idToken;
 
         const response = await fetch("/api/admin/bookings", {
           method: "POST",
