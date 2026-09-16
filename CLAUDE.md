@@ -128,4 +128,103 @@ endpoints. Any test that hardcodes an id cannot catch this class of bug.
 
 ## Repo status
 
-The repository is currently empty; the app has not been scaffolded yet. Build, test, and deploy commands, directory conventions, and schema notes should be added to this file once they actually exist — do not infer or invent them.
+Deployed and working end to end: a customer books inside LINE, gets a Flex
+confirmation in their chat, and a reminder the evening before. The salon owner
+sees today's and the coming week's bookings.
+
+### Commands
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Local dev server |
+| `npm run build` | Production build — also runs ESLint and typechecks |
+| `npm run lint` | ESLint alone |
+| `npx tsc --noEmit` | Typecheck alone |
+
+The verification scripts are not wired into `npm test`; there is no test runner.
+Run them directly:
+
+```
+NODE_OPTIONS=--conditions=react-server npx tsx scripts/verify-slots.ts
+NODE_OPTIONS=--conditions=react-server npx tsx scripts/verify-supabase-tokens.ts
+NODE_OPTIONS=--conditions=react-server npx tsx scripts/verify-booking-endpoints.ts
+BASE_URL=https://line-business.vercel.app NODE_OPTIONS=--conditions=react-server \
+  npx tsx scripts/verify-booking-endpoints.ts     # same guards, against production
+node scripts/check-env-safety.mjs                 # plain node, no flags
+```
+
+**`NODE_OPTIONS=--conditions=react-server` is required**, not optional. The
+modules under test import `server-only`, whose default export throws outside a
+React Server build; Next resolves it to an empty module via that export
+condition, and the flag makes plain node do the same. Without it the scripts die
+on import with "This module cannot be imported from a Client Component module".
+
+`scripts/` also holds two operational tools, not tests: `set-tenant-line-ids.ts`
+(writes a tenant's LIFF and channel ids from `SEED_DEMO_*`; the only code that
+authenticates with the service-role key — `check-env-safety.mjs` names it too,
+but only to scan for leaks) and `send-test-push.ts` (previews either Flex card;
+pass `reminder` for the reminder one).
+
+### Layout
+
+```
+config/tenants/      seed source + the oracle for verify-slots.ts. NOT a runtime import.
+supabase/migrations/ numbered, applied in order by hand in the SQL editor
+supabase/*.sql       one-off operational scripts, not migrations
+src/app/api/         route handlers
+src/app/liff/        every LIFF page — see the endpoint constraint below
+src/components/      UI
+src/i18n/            zh-Hant strings behind semantic keys
+src/lib/booking/     slot rules: availability.ts is production, slots.ts is the oracle
+src/lib/line/        ID token verification, push, Flex card builders
+src/lib/supabase/    token minting and the request-scoped client
+src/lib/tenants/     database-backed tenant loader the pages render from
+src/lib/time/        the only module allowed to convert Taipei wall clock to instants
+```
+
+**Every LIFF page must live at or below `/liff/booking`**, because that is the
+LIFF app's registered endpoint URL and `liff.init()` only runs there. A sibling
+route is rejected by LINE with a bare `400 Bad Request` on every device, which is
+indistinguishable from a broken deploy. This already cost a debugging session.
+
+### Schema
+
+Migrations `0001`–`0005`, applied in order. `0001` creates tenants, services,
+staff, business_hours, closed_dates, customers and bookings; `0002` repairs
+`updated_at` triggers for databases that ran an early `0001`; `0003` adds the
+slug-claim policy the two-phase token needs; `0004` adds tenant_admins; `0005`
+adds reminder tracking.
+
+Two things worth knowing before changing anything here:
+
+- **`bookings_no_staff_overlap`** is a GiST exclusion constraint, and it — not
+  the application's availability check — is what makes double-booking
+  impossible. The server's check exists to produce a friendly error; the
+  constraint is the guarantee. `23P01` is therefore an expected outcome under
+  concurrency, not a fault.
+- **`reminder_sent_at`** is what stops a customer being reminded twice. Only
+  null rows are selected, and stamping happens only after LINE accepts the push.
+
+### Scheduled jobs
+
+`vercel.json` defines two crons. `/api/health` every three days keeps the
+free-tier Supabase project from auto-pausing after seven days idle — a pause
+presents as the slot grid failing mid-booking. `/api/cron/reminders` daily at
+11:00 UTC, which is 19:00 Asia/Taipei. Both Vercel schedules are UTC and may
+drift by up to an hour.
+
+`/api/cron/reminders` refuses to run unless `CRON_SECRET` is set and matches,
+because it sends real messages to real customers.
+
+### Still deferred
+
+Pending/approval flow, per-staff hours, per-staff services, payments,
+multi-branch — all waiting on a real salon owner asking for them. Browser access
+to the admin view is also deferred: LIFF depends on browser storage that
+external browsers often block, and the intended fix is a short-lived signed link
+issued from the LIFF admin page, not a second auth system.
+
+The reminder job's tenant enumeration reads every tenant through a claim-gated
+function, so it scales, but `TENANT_SLUG` is still hardcoded in the two LIFF
+pages. Swapping that for a route segment is the one remaining step to real
+multi-tenancy.
