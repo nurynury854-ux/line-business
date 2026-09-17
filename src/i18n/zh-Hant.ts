@@ -110,6 +110,15 @@ export const messages = {
   "admin.relogin": "重新登入 LINE",
   "admin.openInLine": "請在 LINE 應用程式中開啟此頁面。瀏覽器可能封鎖了 LINE 登入所需的資料。",
 
+  // DalaTech's own sales page — the agency, not a salon.
+  "agency.plans.title": "服務與方案",
+  "agency.plans.includes": "方案內容",
+  "agency.plans.faq": "常見問題",
+  "agency.plans.contact": "立即諮詢",
+  "agency.plans.demoLead": "想先看看實際操作？",
+  "agency.plans.demo": "體驗預約流程",
+  "agency.plans.footer": "價格依需求範圍而定，歡迎聯繫我們討論。",
+
   "weekday.0": "週日",
   "weekday.1": "週一",
   "weekday.2": "週二",
