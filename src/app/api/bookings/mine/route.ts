@@ -8,9 +8,10 @@ import { authenticateCustomer } from "@/lib/line/customer-session";
  * a GET would put it in a URL where it lands in access logs and history.
  *
  * bookings_read_own_tenant lets a session token see every booking in the tenant
- * (availability needs that), so "mine" is enforced HERE by filtering on the
- * customer row — and customers_read_self guarantees that row can only be the
- * caller's own. A caller with no customer row has simply never booked.
+ * (availability needs that), so "mine" is enforced HERE: resolve the customer
+ * row by the VERIFIED LINE subject, then filter bookings on it. RLS still
+ * backstops the read, but it is not what narrows it — see the note at the
+ * lookup. A caller with no customer row has simply never booked.
  *
  * `canCancel` and `cancelDeadline` are advisory, for the UI. The database
  * function called by /api/bookings/cancel re-checks everything, so a stale
@@ -58,10 +59,25 @@ export async function POST(request: Request) {
       { status: session.status },
     );
   }
-  const { client, tenant } = session;
+  const { client, tenant, identity } = session;
 
-  // RLS returns at most the caller's own row here.
-  const { data: customer } = await client.from("customers").select("id").maybeSingle();
+  // Filter on the VERIFIED subject explicitly rather than relying on RLS to
+  // narrow the result. RLS alone is not enough here: a caller who is also a
+  // tenant admin can read every customer in the tenant (0004), so an unfiltered
+  // maybeSingle() sees several rows, errors, and reads as "no bookings" — which
+  // is exactly how the salon owner testing their own app saw an empty list.
+  const { data: customer, error: customerError } = await client
+    .from("customers")
+    .select("id")
+    .eq("line_user_id", identity.lineUserId)
+    .maybeSingle();
+
+  if (customerError) {
+    return NextResponse.json(
+      { error: "Could not resolve the customer.", detail: customerError.message },
+      { status: 500 },
+    );
+  }
 
   const now = new Date();
   const cutoffMs = tenant.cancellation_cutoff_minutes * 60_000;
