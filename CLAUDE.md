@@ -132,6 +132,13 @@ Deployed and working end to end: a customer books inside LINE, gets a Flex
 confirmation in their chat, and a reminder the evening before. The salon owner
 sees today's and the coming week's bookings.
 
+Built and verified, awaiting migrations `0006`–`0007` in production: customers
+see and cancel their own bookings (`/liff/booking/mine`, cutoff per tenant,
+default 2 hours) and a salon-info page (`/liff/booking/info`). **Apply the two
+migrations before deploying that code** — the loader now selects the new
+columns, and against a database without them every page under `/liff/booking`
+returns 404 and `/api/bookings` returns 500.
+
 ### Commands
 
 | Command | Purpose |
@@ -173,6 +180,7 @@ supabase/migrations/ numbered, applied in order by hand in the SQL editor
 supabase/*.sql       one-off operational scripts, not migrations
 src/app/api/         route handlers
 src/app/liff/        every LIFF page — see the endpoint constraint below
+                     booking/ (book) · booking/mine (see + cancel) · booking/info (hours, address) · booking/admin (owner)
 src/components/      UI
 src/i18n/            zh-Hant strings behind semantic keys
 src/lib/booking/     slot rules: availability.ts is production, slots.ts is the oracle
@@ -189,11 +197,15 @@ indistinguishable from a broken deploy. This already cost a debugging session.
 
 ### Schema
 
-Migrations `0001`–`0005`, applied in order. `0001` creates tenants, services,
+Migrations `0001`–`0007`, applied in order. `0001` creates tenants, services,
 staff, business_hours, closed_dates, customers and bookings; `0002` repairs
 `updated_at` triggers for databases that ran an early `0001`; `0003` adds the
 slug-claim policy the two-phase token needs; `0004` adds tenant_admins; `0005`
-adds reminder tracking.
+adds reminder tracking; `0006` adds the salon's contact columns (address, phone,
+maps_url, instagram_url, website_url); `0007` adds customer cancellation —
+`tenants.cancellation_cutoff_minutes`, `bookings.cancelled_at`, the
+`cancel_own_booking()` function, and re-creates `reminders_due()` with
+`tenant_liff_id` so the reminder card can link to 我的預約.
 
 Two things worth knowing before changing anything here:
 
@@ -204,6 +216,22 @@ Two things worth knowing before changing anything here:
   concurrency, not a fault.
 - **`reminder_sent_at`** is what stops a customer being reminded twice. Only
   null rows are selected, and stamping happens only after LINE accepts the push.
+- **`cancel_own_booking()` owns the cancellation rule**, not the route. It
+  checks ownership, status and the tenant's cutoff inside a row lock and
+  returns a code (`cancelled` / `not_found` / `already_cancelled` /
+  `not_cancellable` / `past` / `too_late`); `/api/bookings/cancel` only maps
+  the code to a status. The screen's "can cancel" hint is advisory. A missing
+  claim reads as `not_found`, never an error.
+- **Function grants: revoke from `public`, not just `anon`.** Postgres grants
+  EXECUTE to PUBLIC on every new function, so `revoke ... from anon` alone
+  changes nothing. `0007` revokes from `public, anon` and grants back to
+  `authenticated, service_role`; `0005`'s two functions still carry the older,
+  weaker pattern (harmless because they are claim-gated, but do not copy it).
+- **Migrations can be dry-run locally without Postgres installed.** pglite (an
+  in-process Postgres, `npm i @electric-sql/pglite` in a scratch directory with
+  its `btree_gist` extension) applies `0001`–`0007` and the seed unchanged, given
+  a two-line shim for `auth.jwt()` and the three Supabase roles. That is how
+  `0007`'s outcomes were exercised before it was ever pasted into the SQL editor.
 
 ### Scheduled jobs
 
@@ -225,6 +253,27 @@ external browsers often block, and the intended fix is a short-lived signed link
 issued from the LIFF admin page, not a second auth system.
 
 The reminder job's tenant enumeration reads every tenant through a claim-gated
-function, so it scales, but `TENANT_SLUG` is still hardcoded in the two LIFF
+function, so it scales, but `TENANT_SLUG` is still hardcoded in the four LIFF
 pages. Swapping that for a route segment is the one remaining step to real
 multi-tenancy.
+
+Also deferred, from the 我的預約 work: notifying the salon owner when a customer
+cancels (no owner push path exists yet — the owner sees it on the admin page),
+rescheduling (today it is cancel + rebook), and a 設計師介紹 page (explicitly
+not wanted for the demo).
+
+### Rich menu
+
+Four cells, one LIFF URL each. LIFF appends the path to the registered endpoint
+`/liff/booking`, so the URLs are:
+
+| Cell | URL |
+| --- | --- |
+| 立即預約 | `https://liff.line.me/{liff_id}` |
+| 我的預約 | `https://liff.line.me/{liff_id}/mine` |
+| 店家資訊 | `https://liff.line.me/{liff_id}/info` |
+| 服務與方案 (DalaTech OA) | `https://line-business.vercel.app/pricing` — plain URL, not LIFF |
+
+The confirmation and reminder cards carry a 查看我的預約 button to the `/mine`
+URL whenever the tenant row has a `liff_id`; without one the button is omitted
+and the notice falls back to "contact the salon".

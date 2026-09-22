@@ -132,6 +132,37 @@ async function main() {
   check("admin verifies the id token before checking membership",
     (await adminPost({ tenantSlug: SLUG, idToken: "not-a-real-token" })).status === 401);
 
+  // Customer self-service routes: same ordering. Both must refuse before any row
+  // is read, and cancel must refuse a non-uuid before even resolving the tenant.
+  const post = (route: string, payload: Record<string, unknown>) =>
+    fetch(`${BASE_URL}${route}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+  check("my-bookings rejects a missing id token", (await post("/api/bookings/mine", { tenantSlug: SLUG })).status === 400);
+  check("my-bookings rejects an unknown tenant",
+    (await post("/api/bookings/mine", { tenantSlug: "no-such-salon", idToken: "x" })).status === 404);
+  check("my-bookings verifies the id token before reading bookings",
+    (await post("/api/bookings/mine", { tenantSlug: SLUG, idToken: "not-a-real-token" })).status === 401);
+
+  const someUuid = service.id;
+  check("cancel rejects a non-uuid booking id",
+    (await post("/api/bookings/cancel", { tenantSlug: SLUG, idToken: "x", bookingId: "42" })).status === 400);
+  check("cancel verifies the id token before touching the booking",
+    (await post("/api/bookings/cancel", { tenantSlug: SLUG, idToken: "not-a-real-token", bookingId: someUuid })).status === 401);
+
+  // The two new pages render from the same loader. A 200 here also proves the
+  // tenant row carries the 0006/0007 columns the loader now selects — a missing
+  // migration turns every page under /liff/booking into a 404.
+  for (const page of ["/liff/booking", "/liff/booking/mine", "/liff/booking/info"]) {
+    const response = await fetch(`${BASE_URL}${page}`);
+    check(`${page} renders`, response.status === 200, `HTTP ${response.status}`);
+  }
+  check("loader exposes the cancellation cutoff",
+    Number.isInteger(loaded.tenant.booking.cancellationCutoffMinutes),
+    `${loaded.tenant.booking.cancellationCutoffMinutes} minutes`);
+
   // The reminder cron sends real messages to real customers. An open endpoint is
   // a spam cannon, so anything other than 401/503 here is a serious regression.
   const cron = await fetch(`${BASE_URL}/api/cron/reminders`);

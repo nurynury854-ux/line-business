@@ -1,6 +1,6 @@
 -- Seeds the demo salon, mirroring config/tenants/demo.ts exactly.
 --
--- Run in the Supabase SQL editor AFTER 0001 and 0002. Idempotent: safe to run
+-- Run in the Supabase SQL editor AFTER 0001 through 0007. Idempotent: safe to run
 -- repeatedly. Fixed UUIDs so re-running updates rows rather than duplicating
 -- them, and so scripts/verify-role-mapping.mjs can reference the tenant id.
 --
@@ -18,7 +18,9 @@
 insert into public.tenants (
   id, slug, name, logo_url, brand,
   line_login_channel_id, liff_id,
-  slot_interval_minutes, minimum_lead_time_minutes, booking_window_days
+  slot_interval_minutes, minimum_lead_time_minutes, booking_window_days,
+  cancellation_cutoff_minutes,
+  address, phone, maps_url, instagram_url, website_url
 ) values (
   '11111111-1111-4111-8111-111111111111',
   'demo',
@@ -27,7 +29,14 @@ insert into public.tenants (
   '{"primary":"#1f5f4e","onPrimary":"#ffffff","accent":"#c9a227"}'::jsonb,
   'REPLACE_ME_LOGIN_CHANNEL_ID',
   null,
-  30, 60, 14
+  30, 60, 14,
+  120,
+  -- SAMPLE contact details for a fictional salon; a real tenant replaces them.
+  '台北市大安區忠孝東路四段 123 號 2 樓',
+  '02-2345-6789',
+  'https://maps.google.com/?q=台北市大安區忠孝東路四段123號',
+  'https://www.instagram.com/',
+  null
 )
 on conflict (id) do update set
   slug = excluded.slug,
@@ -36,7 +45,13 @@ on conflict (id) do update set
   brand = excluded.brand,
   slot_interval_minutes = excluded.slot_interval_minutes,
   minimum_lead_time_minutes = excluded.minimum_lead_time_minutes,
-  booking_window_days = excluded.booking_window_days;
+  booking_window_days = excluded.booking_window_days,
+  cancellation_cutoff_minutes = excluded.cancellation_cutoff_minutes,
+  address = excluded.address,
+  phone = excluded.phone,
+  maps_url = excluded.maps_url,
+  instagram_url = excluded.instagram_url,
+  website_url = excluded.website_url;
 
 -- Services. Upserted by id rather than deleted, because bookings reference them.
 insert into public.services (id, tenant_id, name, description, duration_minutes, price_twd, sort_order) values

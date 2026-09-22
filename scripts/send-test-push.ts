@@ -30,11 +30,19 @@ for (const raw of fs.existsSync(path.join(process.cwd(), ".env.local"))
 
 import { buildBookingConfirmationMessage } from "@/lib/line/booking-confirmation";
 import { buildBookingReminderMessage } from "@/lib/line/booking-reminder";
+import { buildBookingCancelledMessage } from "@/lib/line/booking-cancelled";
 import { pushToLineUser } from "@/lib/line/push";
 
 async function main() {
-  // Which card to preview: `npx tsx scripts/send-test-push.ts reminder`
-  const which = process.argv[2] === "reminder" ? "reminder" : "confirmation";
+  // Which card to preview: `npx tsx scripts/send-test-push.ts reminder|cancelled`
+  const which =
+    process.argv[2] === "reminder" ? "reminder"
+    : process.argv[2] === "cancelled" ? "cancelled"
+    : "confirmation";
+
+  // The buttons need a LIFF URL; the demo tenant's id is in .env.local.
+  const liffId = process.env.SEED_DEMO_LIFF_ID ?? process.env.NEXT_PUBLIC_LIFF_ID ?? null;
+  const myBookingsUrl = liffId ? `https://liff.line.me/${liffId}/mine` : null;
 
   const message = which === "reminder"
     ? buildBookingReminderMessage({
@@ -46,6 +54,18 @@ async function main() {
         startsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         durationMinutes: 60,
         priceTwd: 800,
+        myBookingsUrl,
+      })
+    : which === "cancelled"
+    ? buildBookingCancelledMessage({
+        tenantName: "沐光髮藝",
+        brandPrimary: "#1f5f4e",
+        serviceName: "洗剪吹",
+        staffName: "小雨",
+        startsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        priceTwd: 800,
+        bookingId: "3f9a1c2e-7b4d-4e8a-9c1f-2d5e6f7a8b9c",
+        bookAgainUrl: liffId ? `https://liff.line.me/${liffId}/` : null,
       })
     : buildBookingConfirmationMessage({
     tenantName: "沐光髮藝",
@@ -58,6 +78,8 @@ async function main() {
     priceTwd: 800,
     bookingId: "3f9a1c2e-7b4d-4e8a-9c1f-2d5e6f7a8b9c",
     wasReassigned: true,
+    myBookingsUrl,
+    cancellationCutoffMinutes: 120,
   });
 
   console.log(`card: ${which}`);

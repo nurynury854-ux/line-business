@@ -52,3 +52,28 @@ export function formatPriceTwd(amount: number): string {
     maximumFractionDigits: 0,
   }).format(amount);
 }
+
+/**
+ * "2 小時" or "90 分鐘" — a cutoff or lead time, in whichever unit reads
+ * naturally. Whole hours are shown as hours; anything else stays in minutes so
+ * "1.5 小時" never appears.
+ */
+export function formatMinutesAsDuration(minutes: number): string {
+  if (minutes > 0 && minutes % 60 === 0) {
+    return t("duration.hours", { hours: minutes / 60 });
+  }
+  return t("duration.minutes", { minutes });
+}
+
+/** "9月3日（週三）14:00" — an instant, rendered in Asia/Taipei. */
+export function formatInstantShort(instant: Date): string {
+  return new Intl.DateTimeFormat(LOCALE, {
+    timeZone: TAIPEI_TIME_ZONE,
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(instant);
+}

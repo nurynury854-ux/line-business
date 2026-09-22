@@ -37,7 +37,9 @@ export async function loadTenantBySlug(slug: string): Promise<LoadedTenant | nul
   const { data: row } = await lookupClient
     .from("tenants")
     .select(
-      "id, slug, name, logo_url, brand, liff_id, slot_interval_minutes, minimum_lead_time_minutes, booking_window_days",
+      // One literal, not a concatenation: supabase-js parses this string at the
+      // type level, and a non-literal collapses every column to an error type.
+      "id, slug, name, logo_url, brand, liff_id, slot_interval_minutes, minimum_lead_time_minutes, booking_window_days, cancellation_cutoff_minutes, address, phone, maps_url, instagram_url, website_url",
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -77,6 +79,10 @@ export async function loadTenantBySlug(slug: string): Promise<LoadedTenant | nul
 
   const brand = (row.brand ?? {}) as Partial<TenantConfig["brand"]>;
 
+  // Null columns become absent keys, so the page can test presence directly.
+  const text = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim() !== "" ? value : undefined;
+
   return {
     liffId: (row.liff_id as string | null) ?? null,
     tenant: {
@@ -87,6 +93,13 @@ export async function loadTenantBySlug(slug: string): Promise<LoadedTenant | nul
         primary: brand.primary ?? "#222222",
         onPrimary: brand.onPrimary ?? "#ffffff",
         accent: brand.accent ?? "#888888",
+      },
+      contact: {
+        address: text(row.address),
+        phone: text(row.phone),
+        mapsUrl: text(row.maps_url),
+        instagramUrl: text(row.instagram_url),
+        websiteUrl: text(row.website_url),
       },
       services: (services.data ?? []).map((service) => ({
         id: service.id as string,
@@ -106,6 +119,7 @@ export async function loadTenantBySlug(slug: string): Promise<LoadedTenant | nul
         slotIntervalMinutes: row.slot_interval_minutes as number,
         minimumLeadTimeMinutes: row.minimum_lead_time_minutes as number,
         windowDays: row.booking_window_days as number,
+        cancellationCutoffMinutes: row.cancellation_cutoff_minutes as number,
       },
       // Availability comes from GET /api/availability, which reads real
       // bookings. Nothing client-side consults this.

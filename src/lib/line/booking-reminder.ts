@@ -20,6 +20,8 @@ export type BookingReminderInput = {
   startsAt: Date;
   durationMinutes: number;
   priceTwd: number;
+  /** LIFF URL of the 我的預約 page. Null omits the button and softens the notice. */
+  myBookingsUrl: string | null;
 };
 
 function taipeiTime(instant: Date): string {
@@ -44,7 +46,7 @@ function row(label: string, value: string) {
 }
 
 export function buildBookingReminderMessage(input: BookingReminderInput) {
-  const { tenantName, brandPrimary, serviceName, staffName, startsAt, durationMinutes, priceTwd } = input;
+  const { tenantName, brandPrimary, serviceName, staffName, startsAt, durationMinutes, priceTwd, myBookingsUrl } = input;
 
   const date = calendarDateInTaipei(startsAt);
   const time = taipeiTime(startsAt);
@@ -81,7 +83,7 @@ export function buildBookingReminderMessage(input: BookingReminderInput) {
           row(t("notify.confirm.price"), formatPriceTwd(priceTwd)),
           {
             type: "text",
-            text: t("notify.reminder.changeNotice"),
+            text: myBookingsUrl ? t("notify.reminder.changeNotice") : t("notify.reminder.changeNoticeNoApp"),
             size: "xs",
             color: "#888888",
             wrap: true,
@@ -89,6 +91,23 @@ export function buildBookingReminderMessage(input: BookingReminderInput) {
           },
         ],
       },
+      ...(myBookingsUrl
+        ? {
+            footer: {
+              type: "box",
+              layout: "vertical",
+              paddingAll: "12px",
+              contents: [
+                {
+                  type: "button",
+                  style: "secondary",
+                  height: "sm",
+                  action: { type: "uri", label: t("notify.action.viewMine"), uri: myBookingsUrl },
+                },
+              ],
+            },
+          }
+        : {}),
     },
   };
 }

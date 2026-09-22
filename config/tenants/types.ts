@@ -55,10 +55,28 @@ export type BookedSlot = {
   staffId: string;
 };
 
+/**
+ * What the salon prints on its door. Every field is optional and the 店家資訊
+ * page renders only the ones present — a salon without Instagram has no
+ * Instagram row, not an empty one.
+ */
+export type TenantContact = {
+  /** One line, as the salon writes it. */
+  address?: string;
+  /** As dialled locally, e.g. "02-2345-6789". Rendered as a tel: link. */
+  phone?: string;
+  /** A Google Maps share link, kept separate from address (see 0006). */
+  mapsUrl?: string;
+  instagramUrl?: string;
+  websiteUrl?: string;
+};
+
 export type TenantConfig = {
   id: string;
   name: string;
   logoUrl: string;
+
+  contact: TenantContact;
 
   /** Fed into CSS custom properties at the root of the flow, never branched on. */
   brand: {
@@ -81,6 +99,11 @@ export type TenantConfig = {
     minimumLeadTimeMinutes: number;
     /** Length of the date picker, counting today as day 1. */
     windowDays: number;
+    /**
+     * A customer may cancel until this many minutes before the start. 0 means
+     * up to the start itself. Later than this, they are told to call.
+     */
+    cancellationCutoffMinutes: number;
   };
 
   /** MOCK. Remove with the backend. */

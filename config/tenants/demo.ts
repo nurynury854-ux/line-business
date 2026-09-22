@@ -15,6 +15,15 @@ export const demoTenant: TenantConfig = {
     accent: "#c9a227",
   },
 
+  // SAMPLE contact details for a fictional salon. A real tenant replaces every
+  // line; the page renders whichever fields are present.
+  contact: {
+    address: "台北市大安區忠孝東路四段 123 號 2 樓",
+    phone: "02-2345-6789",
+    mapsUrl: "https://maps.google.com/?q=台北市大安區忠孝東路四段123號",
+    instagramUrl: "https://www.instagram.com/",
+  },
+
   services: [
     {
       id: "cut",
@@ -80,6 +89,7 @@ export const demoTenant: TenantConfig = {
     slotIntervalMinutes: 30,
     minimumLeadTimeMinutes: 60,
     windowDays: 14,
+    cancellationCutoffMinutes: 120,
   },
 
   // MOCK DATA — stands in for rows Supabase will own, so the disabled slot

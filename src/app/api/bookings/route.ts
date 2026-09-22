@@ -8,6 +8,7 @@ import { createRequestScopedClient } from "@/lib/supabase/client";
 import { serverEnv } from "@/lib/env";
 import { pushToLineUser, type PushOutcome } from "@/lib/line/push";
 import { buildBookingConfirmationMessage } from "@/lib/line/booking-confirmation";
+import { liffPageUrl } from "@/lib/line/customer-session";
 import { t } from "@/i18n";
 import { mintSessionToken, mintTenantLookupToken } from "@/lib/supabase/tokens";
 import {
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
   const { data: tenant, error: tenantError } = await lookupClient
     .from("tenants")
     .select(
-      "id, slug, name, brand, line_login_channel_id, slot_interval_minutes, minimum_lead_time_minutes, booking_window_days",
+      "id, slug, name, brand, liff_id, line_login_channel_id, slot_interval_minutes, minimum_lead_time_minutes, booking_window_days, cancellation_cutoff_minutes",
     )
     .eq("slug", tenantSlug)
     .maybeSingle();
@@ -302,6 +303,8 @@ export async function POST(request: Request) {
         priceTwd: service.price_twd,
         bookingId: created.id as string,
         wasReassigned,
+        myBookingsUrl: liffPageUrl(tenant.liff_id as string | null, "/mine"),
+        cancellationCutoffMinutes: tenant.cancellation_cutoff_minutes as number,
       });
 
       return NextResponse.json(

@@ -7,6 +7,7 @@ import { ANY_STAFF, type StaffSelection, buildDateOptions, isSalonOpen } from "@
 import { t } from "@/i18n";
 import { formatDateLong, formatPriceTwd } from "@/i18n/format";
 import { acquireFreshIdToken } from "@/lib/liff/id-token";
+import { loadLiff } from "@/lib/liff/load";
 import { ConfirmStep, DateStep, ServiceStep, StaffStep, TimeStep } from "./steps";
 
 const STEPS = ["service", "staff", "date", "time", "confirm"] as const;
@@ -42,28 +43,6 @@ type SubmitState =
       /** What happened to the LINE confirmation. The booking stands regardless. */
       notification: "sent" | "failed" | "skipped";
     };
-
-/**
- * LIFF is initialised once per page load and cached at module scope: liff.init()
- * is not idempotent, and React re-renders (and StrictMode) would otherwise call
- * it repeatedly.
- */
-let liffPromise: Promise<typeof import("@line/liff").default> | null = null;
-
-function loadLiff(liffId: string) {
-  if (!liffPromise) {
-    liffPromise = (async () => {
-      const liff = (await import("@line/liff")).default;
-      await liff.init({ liffId });
-      return liff;
-    })().catch((error) => {
-      // Do not cache a failure: a retry should be able to try again.
-      liffPromise = null;
-      throw error;
-    });
-  }
-  return liffPromise;
-}
 
 export default function BookingFlow({
   tenant,

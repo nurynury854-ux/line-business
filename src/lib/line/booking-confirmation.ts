@@ -1,7 +1,7 @@
 import "server-only";
 
 import { t } from "@/i18n";
-import { formatDateLong, formatPriceTwd } from "@/i18n/format";
+import { formatDateLong, formatMinutesAsDuration, formatPriceTwd } from "@/i18n/format";
 
 /**
  * Builds the Flex Message a customer receives after booking.
@@ -29,6 +29,14 @@ export type BookingConfirmationInput = {
   bookingId: string;
   /** True when "any stylist" was requested and the server chose one. */
   wasReassigned: boolean;
+  /**
+   * LIFF URL of the 我的預約 page, where the customer cancels. Null when the
+   * tenant has no LIFF app yet: the button is omitted and the notice falls
+   * back to "contact the salon".
+   */
+  myBookingsUrl: string | null;
+  /** The salon's cancellation cutoff, quoted in the notice. */
+  cancellationCutoffMinutes: number;
 };
 
 type FlexComponent = Record<string, unknown>;
@@ -49,6 +57,7 @@ export function buildBookingConfirmationMessage(input: BookingConfirmationInput)
   const {
     tenantName, brandPrimary, serviceName, staffName, date, time,
     durationMinutes, priceTwd, bookingId, wasReassigned,
+    myBookingsUrl, cancellationCutoffMinutes,
   } = input;
 
   const dateLabel = formatDateLong(date);
@@ -78,11 +87,31 @@ export function buildBookingConfirmationMessage(input: BookingConfirmationInput)
   }
   notes.push({
     type: "text",
-    text: t("notify.confirm.changeNotice"),
+    text: myBookingsUrl
+      ? t("notify.confirm.changeNotice", { cutoff: formatMinutesAsDuration(cancellationCutoffMinutes) })
+      : t("notify.confirm.changeNoticeNoApp"),
     size: "xs",
     color: "#888888",
     wrap: true,
     margin: "md",
+  });
+
+  const footer: FlexComponent[] = [];
+  if (myBookingsUrl) {
+    footer.push({
+      type: "button",
+      style: "secondary",
+      height: "sm",
+      action: { type: "uri", label: t("notify.action.viewMine"), uri: myBookingsUrl },
+    });
+  }
+  footer.push({
+    type: "text",
+    text: t("notify.confirm.reference", { reference: shortReference }),
+    size: "xxs",
+    color: "#aaaaaa",
+    align: "center",
+    margin: myBookingsUrl ? "md" : "none",
   });
 
   return {
@@ -112,15 +141,7 @@ export function buildBookingConfirmationMessage(input: BookingConfirmationInput)
         type: "box",
         layout: "vertical",
         paddingAll: "12px",
-        contents: [
-          {
-            type: "text",
-            text: t("notify.confirm.reference", { reference: shortReference }),
-            size: "xxs",
-            color: "#aaaaaa",
-            align: "center",
-          },
-        ],
+        contents: footer,
       },
     },
   };

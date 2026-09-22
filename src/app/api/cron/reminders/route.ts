@@ -4,6 +4,7 @@ import { mintReminderJobToken } from "@/lib/supabase/tokens";
 import { buildBookingReminderMessage } from "@/lib/line/booking-reminder";
 import { pushToLineUser } from "@/lib/line/push";
 import { serverEnv } from "@/lib/env";
+import { liffPageUrl } from "@/lib/line/customer-session";
 
 /**
  * GET /api/cron/reminders — pushes day-before reminders. Scheduled daily at
@@ -31,6 +32,7 @@ type DueRow = {
   booking_id: string;
   tenant_name: string;
   tenant_brand: { primary?: string } | null;
+  tenant_liff_id: string | null;
   line_user_id: string;
   service_name: string;
   staff_name: string;
@@ -86,6 +88,7 @@ export async function GET(request: Request) {
           startsAt: new Date(row.starts_at),
           durationMinutes: row.duration_minutes,
           priceTwd: row.price_twd,
+          myBookingsUrl: liffPageUrl(row.tenant_liff_id, "/mine"),
         }),
       ],
     });

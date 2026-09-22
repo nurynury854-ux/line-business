@@ -5,6 +5,7 @@ import { t } from "@/i18n";
 import { formatPriceTwd } from "@/i18n/format";
 import { TAIPEI_TIME_ZONE } from "@/lib/time/taipei";
 import { acquireFreshIdToken } from "@/lib/liff/id-token";
+import { loadLiff } from "@/lib/liff/load";
 
 type Booking = {
   id: string;
@@ -27,20 +28,6 @@ type State =
   | { status: "expired"; detail: string }
   | { status: "error"; message: string; detail?: string };
 
-let liffPromise: Promise<typeof import("@line/liff").default> | null = null;
-function loadLiff(liffId: string) {
-  if (!liffPromise) {
-    liffPromise = (async () => {
-      const liff = (await import("@line/liff")).default;
-      await liff.init({ liffId });
-      return liff;
-    })().catch((error) => {
-      liffPromise = null;
-      throw error;
-    });
-  }
-  return liffPromise;
-}
 
 /**
  * Instants come back as UTC and are rendered in Asia/Taipei here, at the display
