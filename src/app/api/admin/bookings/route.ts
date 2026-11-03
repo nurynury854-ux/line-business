@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
+import { readAdminRequest, serverError } from "@/lib/admin/request";
 import {
-  LineTokenVerificationError,
-  verifyLineIdToken,
-} from "@/lib/line/verify-id-token";
-import { createRequestScopedClient } from "@/lib/supabase/client";
-import { mintSessionToken, mintTenantLookupToken } from "@/lib/supabase/tokens";
+  FLAGGABLE_BOOKING_COLUMNS,
+  type FlaggableBookingRow,
+  upcomingFlaggedBookings,
+} from "@/lib/booking/attention";
 import { addCalendarDays, calendarDateInTaipei, taipeiWallClockToInstant } from "@/lib/time/taipei";
 
 /**
@@ -12,116 +12,70 @@ import { addCalendarDays, calendarDateInTaipei, taipeiWallClockToInstant } from 
  *
  * Same trust boundary as customer booking, same order: resolve the tenant with a
  * slug-only token, verify the ID token against THAT tenant's channel, then mint
- * a session token from the verified `sub` (CLAUDE.md §3).
+ * a session token from the verified `sub` (CLAUDE.md §3) — all inside
+ * authenticateAdmin, which also refuses a non-admin with a clean 403.
  *
- * POST rather than GET for a read, deliberately: the ID token is a credential,
- * and a GET would put it in a URL, where it lands in access logs, proxy logs and
- * browser history.
+ * Authorisation is checked TWICE, independently. The route reads tenant_admins
+ * so a non-admin gets a 403 instead of a confusing empty list; and RLS checks
+ * membership again via current_is_tenant_admin() before releasing a single
+ * customer row. The minted token carries no `is_admin` claim, so a bug in this
+ * file cannot grant itself access to customer data.
  *
- * Authorisation is checked TWICE, independently. This route reads tenant_admins
- * so a non-admin gets a clean 403 instead of a confusing empty list; and RLS
- * checks membership again via current_is_tenant_admin() before releasing a
- * single customer row. The minted token carries no `is_admin` claim, so a bug in
- * this file cannot grant itself access to customer data.
+ * Every booking carries `issues` — a hidden stylist or service, a day off, or
+ * hours that no longer cover it — and `attentionCount` counts every upcoming
+ * flagged booking, not just this range's, so a problem three weeks out still
+ * reaches the banner. Range "attention" lists exactly those bookings.
  */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Today only, or the next seven days including today — both in Asia/Taipei. */
-type Range = "today" | "week";
+/** Today, the next seven days including today (both Asia/Taipei), or every flagged upcoming booking. */
+type Range = "today" | "week" | "attention";
 
 export async function POST(request: Request) {
-  let body: { tenantSlug?: unknown; idToken?: unknown; range?: unknown };
+  const parsed = await readAdminRequest(request);
+  if ("response" in parsed) return parsed.response;
+  const { session, body } = parsed;
+  const { client } = session;
+
+  const range: Range = body.range === "week" || body.range === "attention" ? body.range : "today";
+  const now = new Date();
+  const today = calendarDateInTaipei(now);
+
+  let flagged;
   try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
-
-  const { tenantSlug, idToken } = body;
-  const range: Range = body.range === "week" ? "week" : "today";
-
-  if (typeof tenantSlug !== "string" || !tenantSlug) {
-    return NextResponse.json({ error: "tenantSlug is required." }, { status: 400 });
-  }
-  if (typeof idToken !== "string" || !idToken) {
-    return NextResponse.json({ error: "idToken is required." }, { status: 400 });
-  }
-
-  const lookupClient = createRequestScopedClient(await mintTenantLookupToken(tenantSlug));
-  const { data: tenant } = await lookupClient
-    .from("tenants")
-    .select("id, line_login_channel_id")
-    .eq("slug", tenantSlug)
-    .maybeSingle();
-
-  if (!tenant) return NextResponse.json({ error: "Unknown tenant." }, { status: 404 });
-
-  let identity;
-  try {
-    identity = await verifyLineIdToken(idToken, tenant.line_login_channel_id);
+    flagged = await upcomingFlaggedBookings(client, now);
   } catch (error) {
-    if (error instanceof LineTokenVerificationError) {
-      return NextResponse.json(
-        { error: "LINE ID token verification failed.", detail: error.message },
-        { status: 401 },
-      );
-    }
-    throw error;
+    return serverError("Could not load bookings.", (error as Error).message);
   }
 
-  const client = createRequestScopedClient(
-    await mintSessionToken(tenant.id, identity.lineUserId),
-  );
+  let rows: FlaggableBookingRow[];
+  let lastDay: string | null;
 
-  // First check: is this person an admin at all? RLS would hide the customer
-  // rows regardless, but an explicit 403 is a far better answer than a list that
-  // silently omits every name.
-  const { data: adminRow } = await client
-    .from("tenant_admins")
-    .select("id, display_name")
-    .maybeSingle();
+  if (range === "attention") {
+    rows = flagged.map((entry) => entry.row);
+    lastDay = null;
+  } else {
+    lastDay = range === "week" ? addCalendarDays(today, 6) : today;
+    const from = taipeiWallClockToInstant(today, "00:00");
+    const to = taipeiWallClockToInstant(addCalendarDays(lastDay, 1), "00:00");
 
-  if (!adminRow) {
-    return NextResponse.json(
-      { error: "This LINE account is not an admin of this salon." },
-      { status: 403 },
-    );
+    const result = await client
+      .from("bookings")
+      .select(FLAGGABLE_BOOKING_COLUMNS)
+      .neq("status", "cancelled")
+      .gte("starts_at", from.toISOString())
+      .lt("starts_at", to.toISOString())
+      .order("starts_at", { ascending: true });
+
+    if (result.error) return serverError("Could not load bookings.", result.error.message);
+    rows = (result.data ?? []) as unknown as FlaggableBookingRow[];
   }
 
-  const today = calendarDateInTaipei(new Date());
-  const lastDay = range === "week" ? addCalendarDays(today, 6) : today;
-  const from = taipeiWallClockToInstant(today, "00:00");
-  const to = taipeiWallClockToInstant(addCalendarDays(lastDay, 1), "00:00");
+  const issuesById = new Map(flagged.map((entry) => [entry.row.id, entry.issues]));
 
-  const { data: rows, error } = await client
-    .from("bookings")
-    .select(
-      "id, starts_at, ends_at, status, duration_minutes, price_twd, " +
-        "services(name), staff(name), customers(display_name)",
-    )
-    .neq("status", "cancelled")
-    .gte("starts_at", from.toISOString())
-    .lt("starts_at", to.toISOString())
-    .order("starts_at", { ascending: true });
-
-  if (error) {
-    return NextResponse.json(
-      { error: "Could not load bookings.", detail: error.message },
-      { status: 500 },
-    );
-  }
-
-  type Joined = {
-    id: string; starts_at: string; status: string;
-    duration_minutes: number; price_twd: number;
-    services: { name: string } | null;
-    staff: { name: string } | null;
-    customers: { display_name: string | null } | null;
-  };
-
-  const bookings = ((rows ?? []) as unknown as Joined[]).map((row) => ({
+  const bookings = rows.map((row) => ({
     id: row.id,
     startsAt: row.starts_at,
     status: row.status,
@@ -131,10 +85,13 @@ export async function POST(request: Request) {
     staffName: row.staff?.name ?? null,
     // Null when the customer booked before the profile scope was enabled.
     customerName: row.customers?.display_name ?? null,
+    // Only upcoming confirmed bookings are ever flagged: one that already
+    // happened, or is completed, has nothing left for the owner to sort out.
+    issues: issuesById.get(row.id) ?? [],
   }));
 
   return NextResponse.json(
-    { range, from: today, to: lastDay, bookings },
+    { range, from: today, to: lastDay, bookings, attentionCount: flagged.length },
     { headers: { "cache-control": "no-store" } },
   );
 }

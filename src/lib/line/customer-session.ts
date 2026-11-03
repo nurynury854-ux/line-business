@@ -108,3 +108,35 @@ export async function authenticateCustomer(
 export function liffPageUrl(liffId: string | null, path: `/${string}`): string | null {
   return liffId ? `https://liff.line.me/${liffId}${path}` : null;
 }
+
+export type AdminSession =
+  | (Extract<CustomerSession, { ok: true }> & { admin: { id: string; display_name: string | null } })
+  | { ok: false; status: 404 | 401 | 403 | 500; error: string; detail?: unknown };
+
+/**
+ * authenticateCustomer, then: is this verified LINE user an admin of THIS
+ * tenant? Every /api/admin/* route goes through here, so the gate is one piece
+ * of code.
+ *
+ * This check exists for a clean 403. It is not the boundary: the minted token
+ * carries no admin claim, and every admin-only policy asks tenant_admins again
+ * through current_is_tenant_admin() (0004, 0008).
+ */
+export async function authenticateAdmin(tenantSlug: string, idToken: string): Promise<AdminSession> {
+  const session = await authenticateCustomer(tenantSlug, idToken);
+  if (!session.ok) return session;
+
+  const { data: admin, error } = await session.client
+    .from("tenant_admins")
+    .select("id, display_name")
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, status: 500, error: "Could not check admin membership.", detail: error.message };
+  }
+  if (!admin) {
+    return { ok: false, status: 403, error: "This LINE account is not an admin of this salon." };
+  }
+
+  return { ...session, admin: admin as { id: string; display_name: string | null } };
+}

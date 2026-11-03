@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import { t } from "@/i18n";
 import { formatPriceTwd } from "@/i18n/format";
@@ -15,14 +16,18 @@ type Booking = {
   serviceName: string | null;
   staffName: string | null;
   customerName: string | null;
+  issues: BookingIssue[];
 };
 
-type Range = "today" | "week";
+/** Mirrors src/lib/booking/attention.ts, which is server-only. */
+type BookingIssue = "staff_hidden" | "service_hidden" | "closed_day" | "outside_hours";
+
+export type Range = "today" | "week" | "attention";
 
 type State =
   | { status: "loading" }
   | { status: "redirecting" }
-  | { status: "ready"; bookings: Booking[] }
+  | { status: "ready"; bookings: Booking[]; attentionCount: number }
   | { status: "denied" }
   /** The ID token LIFF handed us was rejected — almost always an expired one. */
   | { status: "expired"; detail: string }
@@ -56,13 +61,15 @@ export default function AdminSchedule({
   brandPrimary,
   tenantSlug,
   liffId,
+  initialRange = "today",
 }: {
   tenantName: string;
   brandPrimary: string;
   tenantSlug: string;
   liffId?: string;
+  initialRange?: Range;
 }) {
-  const [range, setRange] = useState<Range>("today");
+  const [range, setRange] = useState<Range>(initialRange);
   const [state, setState] = useState<State>({ status: "loading" });
 
   const load = useCallback(
@@ -125,8 +132,8 @@ export default function AdminSchedule({
           return;
         }
 
-        const payload = (await response.json()) as { bookings: Booking[] };
-        setState({ status: "ready", bookings: payload.bookings });
+        const payload = (await response.json()) as { bookings: Booking[]; attentionCount: number };
+        setState({ status: "ready", bookings: payload.bookings, attentionCount: payload.attentionCount });
       } catch {
         setState({ status: "error", message: t("admin.error") });
       }
@@ -147,9 +154,17 @@ export default function AdminSchedule({
 
   return (
     <div style={brandStyle} className="min-h-dvh bg-black/[0.02]">
-      <header className="px-4 pt-5 pb-3">
-        <p className="truncate text-base font-semibold">{tenantName}</p>
-        <p className="text-xs text-black/55">{t("admin.title")}</p>
+      <header className="flex items-center justify-between gap-3 px-4 pt-5 pb-3">
+        <div className="min-w-0">
+          <p className="truncate text-base font-semibold">{tenantName}</p>
+          <p className="text-xs text-black/55">{t("admin.title")}</p>
+        </div>
+        <Link
+          href={`/liff/booking/${tenantSlug}/admin/settings`}
+          className="flex min-h-11 shrink-0 items-center rounded-xl border-2 border-black/15 bg-white px-3 text-sm font-medium active:opacity-80"
+        >
+          {t("admin.settings.open")}
+        </Link>
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 pb-10">
@@ -233,6 +248,27 @@ export default function AdminSchedule({
           </div>
         )}
 
+        {state.status === "ready" && state.attentionCount > 0 && range !== "attention" && (
+          <button
+            type="button"
+            onClick={() => setRange("attention")}
+            className="mb-4 w-full rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-left active:opacity-80"
+          >
+            <span className="block text-sm font-semibold text-amber-900">
+              {t("admin.attention.banner", { count: state.attentionCount })}
+            </span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-amber-900/80">
+              {t("admin.attention.hint")}
+            </span>
+          </button>
+        )}
+
+        {state.status === "ready" && range === "attention" && state.bookings.length > 0 && (
+          <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-relaxed text-amber-900">
+            {t("admin.attention.hint")}
+          </p>
+        )}
+
         {state.status === "ready" && (
           <>
             <div className="mb-3 flex items-baseline justify-between text-xs text-black/55">
@@ -244,20 +280,28 @@ export default function AdminSchedule({
 
             {state.bookings.length === 0 ? (
               <p className="py-8 text-center text-sm text-black/50">
-                {t(range === "today" ? "admin.empty.today" : "admin.empty.week")}
+                {t(
+                  range === "today"
+                    ? "admin.empty.today"
+                    : range === "week"
+                      ? "admin.empty.week"
+                      : "admin.attention.empty",
+                )}
               </p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {state.bookings.map((booking) => (
                   <li
                     key={booking.id}
-                    className="rounded-xl border border-black/10 bg-white p-3"
+                    className={`rounded-xl border bg-white p-3 ${
+                      booking.issues.length > 0 ? "border-amber-300" : "border-black/10"
+                    }`}
                   >
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="font-mono text-base font-semibold tabular-nums">
                         {taipeiTime(booking.startsAt)}
                       </span>
-                      {range === "week" && (
+                      {range !== "today" && (
                         <span className="text-xs text-black/50">
                           {taipeiDayLabel(booking.startsAt)}
                         </span>
@@ -273,6 +317,18 @@ export default function AdminSchedule({
                       {" ・ "}
                       {formatPriceTwd(booking.priceTwd)}
                     </p>
+                    {booking.issues.length > 0 && (
+                      <ul className="mt-2 flex flex-wrap gap-1.5">
+                        {booking.issues.map((issue) => (
+                          <li
+                            key={issue}
+                            className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900"
+                          >
+                            {t(`admin.issue.${issue}` as const)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </li>
                 ))}
               </ul>

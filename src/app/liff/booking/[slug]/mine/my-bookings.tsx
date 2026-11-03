@@ -6,6 +6,7 @@ import { formatInstantShort, formatMinutesAsDuration, formatPriceTwd } from "@/i
 import { TAIPEI_TIME_ZONE } from "@/lib/time/taipei";
 import { acquireFreshIdToken } from "@/lib/liff/id-token";
 import { loadLiff } from "@/lib/liff/load";
+import { bookingHomePath } from "@/lib/tenants/slug";
 
 type Status = "confirmed" | "cancelled" | "completed" | "no_show";
 
@@ -347,7 +348,7 @@ export default function MyBookings({
       {state.status === "ready" && !sheetOpen && (
         <div className="fixed inset-x-0 bottom-0 border-t border-black/10 bg-white/95 px-4 pb-[max(env(safe-area-inset-bottom),12px)] pt-3 backdrop-blur">
           <a
-            href="/liff/booking"
+            href={bookingHomePath(tenantSlug)}
             className="mx-auto flex min-h-14 w-full max-w-md items-center justify-center rounded-xl text-base font-semibold text-white active:opacity-80"
             style={{ backgroundColor: "var(--brand-primary)" }}
           >

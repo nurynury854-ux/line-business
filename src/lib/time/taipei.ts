@@ -41,6 +41,20 @@ export function calendarDateInTaipei(instant: Date): CalendarDate {
 }
 
 /**
+ * The Taipei wall-clock time of an instant, "HH:mm" — the inverse of
+ * taipeiWallClockToInstant's time half. en-GB with h23 purely for a fixed
+ * 24-hour, zero-padded shape; it is not a UI locale.
+ */
+export function wallClockInTaipei(instant: Date): WallClock {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: TAIPEI_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(instant);
+}
+
+/**
  * Calendar arithmetic on a date-only value. Done in UTC deliberately: a bare
  * calendar date has no offset to get wrong, so adding days here cannot drift.
  */

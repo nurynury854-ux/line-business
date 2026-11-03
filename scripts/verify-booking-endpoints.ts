@@ -61,7 +61,7 @@ async function main() {
   // The shape check that would have caught the original bug on its own.
   check("service ids the UI renders are database uuids", UUID.test(service.id), `first: ${service.id}`);
   check("staff ids the UI renders are database uuids", UUID.test(member.id), `first: ${member.id}`);
-  check("liff id comes from the tenant row", Boolean(loaded.liffId), `${loaded.liffId ?? "(null — falling back to env)"}`);
+  check("liff id comes from the tenant row", Boolean(loaded.liffId), `${loaded.liffId ?? "(null — LIFF pages will show an error)"}`);
 
   // Pick a date the salon is actually open on, the way the UI would.
   const today = calendarDateInTaipei(new Date());
@@ -124,6 +124,12 @@ async function main() {
       body: JSON.stringify(payload),
     });
 
+  const adminPostTo = async (route: string, payload: Record<string, unknown>) =>
+    (await fetch(`${BASE_URL}${route}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    })).status;
+
   check("admin rejects a missing id token", (await adminPost({ tenantSlug: SLUG })).status === 400);
   check("admin rejects an unknown tenant",
     (await adminPost({ tenantSlug: "no-such-salon", idToken: "x" })).status === 404);
@@ -131,6 +137,27 @@ async function main() {
   // must never reach the membership check, let alone customer rows.
   check("admin verifies the id token before checking membership",
     (await adminPost({ tenantSlug: SLUG, idToken: "not-a-real-token" })).status === 401);
+
+  // Owner settings routes share one gate (authenticateAdmin). Each must refuse
+  // in the same order before reading or writing anything: no token, unknown
+  // tenant, then an unverifiable token — the write payloads are well-formed, so
+  // a 2xx here would mean a write ran without a verified admin.
+  for (const [route, payload] of [
+    ["/api/admin/settings", {}],
+    ["/api/admin/services", { action: "create", name: "probe", durationMinutes: 30, priceTwd: 0 }],
+    ["/api/admin/staff", { action: "create", name: "probe" }],
+    ["/api/admin/hours", { hours: [] }],
+    ["/api/admin/closures", { action: "add", date: addCalendarDays(today, 30) }],
+    ["/api/admin/profile", { cancellationCutoffMinutes: 120 }],
+  ] as const) {
+    const statuses = await Promise.all([
+      adminPostTo(route, { ...payload, tenantSlug: SLUG }),
+      adminPostTo(route, { ...payload, tenantSlug: "no-such-salon", idToken: "x" }),
+      adminPostTo(route, { ...payload, tenantSlug: SLUG, idToken: "not-a-real-token" }),
+    ]);
+    check(`${route} refuses: no token 400, unknown tenant 404, bad token 401`,
+      statuses.join() === "400,404,401", statuses.join(", "));
+  }
 
   // Customer self-service routes: same ordering. Both must refuse before any row
   // is read, and cancel must refuse a non-uuid before even resolving the tenant.
@@ -152,13 +179,35 @@ async function main() {
   check("cancel verifies the id token before touching the booking",
     (await post("/api/bookings/cancel", { tenantSlug: SLUG, idToken: "not-a-real-token", bookingId: someUuid })).status === 401);
 
-  // The two new pages render from the same loader. A 200 here also proves the
-  // tenant row carries the 0006/0007 columns the loader now selects — a missing
-  // migration turns every page under /liff/booking into a 404.
-  for (const page of ["/liff/booking", "/liff/booking/mine", "/liff/booking/info"]) {
+  // Every LIFF page renders from the same loader, under the tenant's own route
+  // segment. A 200 here also proves the tenant row carries the 0006/0007
+  // columns the loader selects — a missing migration turns every page under
+  // /liff/booking/{slug} into a 404.
+  const home = `/liff/booking/${SLUG}`;
+  for (const page of [home, `${home}/mine`, `${home}/info`, `${home}/admin`, `${home}/admin/settings`]) {
     const response = await fetch(`${BASE_URL}${page}`);
     check(`${page} renders`, response.status === 200, `HTTP ${response.status}`);
   }
+  for (const page of ["/liff/booking/no-such-salon", "/liff/booking/no-such-salon/mine", "/liff/booking/Not_A_Slug"]) {
+    const response = await fetch(`${BASE_URL}${page}`);
+    check(`${page} is a 404`, response.status === 404, `HTTP ${response.status}`);
+  }
+
+  // The demo's LIFF app may still be registered at the pre-tenancy endpoint.
+  // These redirects keep it working, and must keep the query string, because
+  // LIFF carries the sub-page in `liff.state`.
+  for (const [from, to] of [
+    ["/liff/booking?liff.state=%2Fmine", "/liff/booking/demo?liff.state=%2Fmine"],
+    ["/liff/booking/mine", "/liff/booking/demo/mine"],
+    ["/liff/booking/info", "/liff/booking/demo/info"],
+  ] as const) {
+    const response = await fetch(`${BASE_URL}${from}`, { redirect: "manual" });
+    const location = response.headers.get("location") ?? "";
+    check(`legacy ${from} redirects`,
+      response.status === 307 && new URL(location, BASE_URL).pathname + new URL(location, BASE_URL).search === to,
+      `HTTP ${response.status} -> ${location}`);
+  }
+
   check("loader exposes the cancellation cutoff",
     Number.isInteger(loaded.tenant.booking.cancellationCutoffMinutes),
     `${loaded.tenant.booking.cancellationCutoffMinutes} minutes`);

@@ -6,6 +6,7 @@ import { t } from "@/i18n";
 import { formatDateLong, formatMinutesAsDuration } from "@/i18n/format";
 import { calendarDateInTaipei, weekdayOf } from "@/lib/time/taipei";
 import { loadTenantBySlug } from "@/lib/tenants/load";
+import { bookingHomePath, isTenantSlug } from "@/lib/tenants/slug";
 
 /**
  * 店家資訊 — hours, address, phone, links. Everything on it is a tenant row
@@ -17,8 +18,6 @@ import { loadTenantBySlug } from "@/lib/tenants/load";
  * other pages.
  */
 
-const TENANT_SLUG = "demo";
-
 export const dynamic = "force-dynamic";
 
 /** Monday first, as a Taiwanese opening-hours sign reads. */
@@ -26,8 +25,11 @@ const WEEK_ORDER: Weekday[] = [1, 2, 3, 4, 5, 6, 0];
 
 const MAX_CLOSURES_SHOWN = 5;
 
-export default async function InfoPage() {
-  const loaded = await loadTenantBySlug(TENANT_SLUG);
+export default async function InfoPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  if (!isTenantSlug(slug)) notFound();
+
+  const loaded = await loadTenantBySlug(slug);
   if (!loaded) notFound();
   const { tenant } = loaded;
   const { contact } = tenant;
@@ -154,7 +156,7 @@ export default async function InfoPage() {
 
       <div className="fixed inset-x-0 bottom-0 border-t border-black/10 bg-white/95 px-4 pb-[max(env(safe-area-inset-bottom),12px)] pt-3 backdrop-blur">
         <a
-          href="/liff/booking"
+          href={bookingHomePath(slug)}
           className="mx-auto flex min-h-14 w-full max-w-md items-center justify-center rounded-xl text-base font-semibold text-white active:opacity-80"
           style={{ backgroundColor: "var(--brand-primary)" }}
         >

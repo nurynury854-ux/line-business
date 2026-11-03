@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { dalaTech } from "@config/agency/offerings";
 import { t } from "@/i18n";
+import { bookingHomePath } from "@/lib/tenants/slug";
 
 /**
  * DalaTech's own sales page, linked from the 價目表 button on the agency's LINE
@@ -85,7 +86,7 @@ export default function PricingPage() {
         <section className="mt-5 rounded-2xl border border-black/10 bg-white p-4 text-center">
           <p className="text-sm text-black/65">{t("agency.plans.demoLead")}</p>
           <Link
-            href="/liff/booking"
+            href={bookingHomePath(dalaTech.demoTenantSlug)}
             className="mt-3 flex min-h-12 w-full items-center justify-center rounded-xl border-2 text-sm font-semibold active:opacity-80"
             style={{ borderColor: "#1f5f4e", color: "#1f5f4e" }}
           >

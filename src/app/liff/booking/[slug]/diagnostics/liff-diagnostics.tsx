@@ -94,18 +94,16 @@ function peekIdTokenClaims(token: string): Omit<IdTokenInfo, "length"> {
   }
 }
 
-export default function LiffDiagnostics() {
+export default function LiffDiagnostics({ liffId }: { liffId?: string }) {
   const [phase, setPhase] = useState<Phase>({ status: "loading" });
   const hasStarted = useRef(false);
 
   const initialise = useCallback(async () => {
     try {
-      const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
       if (!liffId) {
         throw new Error(
-          "NEXT_PUBLIC_LIFF_ID is not set. Add it in Vercel as type Config, " +
-            "then redeploy — NEXT_PUBLIC_* values are inlined at build time, " +
-            "so saving the variable alone does not update the running site.",
+          "This tenant has no liff_id. Set tenants.liff_id for this slug " +
+            "(scripts/set-tenant-line-ids.ts for the demo).",
         );
       }
 
@@ -166,7 +164,7 @@ export default function LiffDiagnostics() {
     } catch (error) {
       setPhase({ status: "error", detail: describeError(error) });
     }
-  }, []);
+  }, [liffId]);
 
   useEffect(() => {
     if (hasStarted.current) return;

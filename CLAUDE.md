@@ -132,12 +132,25 @@ Deployed and working end to end: a customer books inside LINE, gets a Flex
 confirmation in their chat, and a reminder the evening before. The salon owner
 sees today's and the coming week's bookings.
 
-Built and verified, awaiting migrations `0006`–`0007` in production: customers
-see and cancel their own bookings (`/liff/booking/mine`, cutoff per tenant,
-default 2 hours) and a salon-info page (`/liff/booking/info`). **Apply the two
-migrations before deploying that code** — the loader now selects the new
-columns, and against a database without them every page under `/liff/booking`
-returns 404 and `/api/bookings` returns 500.
+Built and verified, awaiting migrations `0006`–`0008` in production:
+
+- customers see and cancel their own bookings (`/mine`, cutoff per tenant,
+  default 2 hours) and a salon-info page (`/info`);
+- **tenants are resolved from the URL** — every LIFF page lives under
+  `/liff/booking/{slug}`, so one deploy serves every salon;
+- **owners edit their own salon** at `/admin/settings`: services and prices,
+  stylists, weekly hours, days off, contact details and the cancellation
+  cutoff. Hiding a stylist or service, adding a day off or shortening hours
+  never cancels anything; affected upcoming bookings are flagged on the owner's
+  schedule (需處理) until the owner sorts them out with the customer.
+
+**Apply the migrations before deploying that code** — the loader selects
+0006/0007's columns, and against a database without them every LIFF page
+returns 404 and `/api/bookings` returns 500; without 0008 every settings save
+fails. After deploying, change the demo LIFF app's endpoint URL to
+`/liff/booking/demo` in the LINE Developers console. The redirects in
+`next.config.ts` keep the old `/liff/booking` endpoint working until then, and
+can be deleted after.
 
 ### Commands
 
@@ -180,24 +193,35 @@ supabase/migrations/ numbered, applied in order by hand in the SQL editor
 supabase/*.sql       one-off operational scripts, not migrations
 src/app/api/         route handlers
 src/app/liff/        every LIFF page — see the endpoint constraint below
-                     booking/ (book) · booking/mine (see + cancel) · booking/info (hours, address) · booking/admin (owner)
+                     booking/[slug]/ (book) · /mine (see + cancel) · /info (hours, address)
+                     · /admin (owner schedule) · /admin/settings (owner edits)
 src/components/      UI
 src/i18n/            zh-Hant strings behind semantic keys
-src/lib/booking/     slot rules: availability.ts is production, slots.ts is the oracle
+src/lib/admin/       owner-settings gate (readAdminRequest), validation, shared list writes
+src/lib/booking/     slot rules: availability.ts is production, slots.ts is the oracle;
+                     attention.ts flags bookings a settings change left uncovered
 src/lib/line/        ID token verification, push, Flex card builders
 src/lib/supabase/    token minting and the request-scoped client
-src/lib/tenants/     database-backed tenant loader the pages render from
+src/lib/tenants/     database-backed tenant loader the pages render from; slug format
 src/lib/time/        the only module allowed to convert Taipei wall clock to instants
 ```
 
-**Every LIFF page must live at or below `/liff/booking`**, because that is the
-LIFF app's registered endpoint URL and `liff.init()` only runs there. A sibling
-route is rejected by LINE with a bare `400 Bad Request` on every device, which is
-indistinguishable from a broken deploy. This already cost a debugging session.
+**Every LIFF page must live at or below `/liff/booking/{slug}`**, because that
+is each salon's LIFF app's registered endpoint URL and `liff.init()` only runs
+there. A sibling route is rejected by LINE with a bare `400 Bad Request` on every
+device, which is indistinguishable from a broken deploy. This already cost a
+debugging session.
+
+The slug in the URL is the tenant. It arrives unverified and that is fine, for
+the reason in §3: it only selects which channel the ID token is checked
+against. A page's `liffId` comes from that tenant's row with no env fallback,
+because another salon's LIFF id cannot init at this salon's URL. The slugs
+`mine`, `info`, `admin`, `diagnostics` and `settings` are reserved by a check
+constraint (0008), since they are page names.
 
 ### Schema
 
-Migrations `0001`–`0007`, applied in order. `0001` creates tenants, services,
+Migrations `0001`–`0008`, applied in order. `0001` creates tenants, services,
 staff, business_hours, closed_dates, customers and bookings; `0002` repairs
 `updated_at` triggers for databases that ran an early `0001`; `0003` adds the
 slug-claim policy the two-phase token needs; `0004` adds tenant_admins; `0005`
@@ -205,7 +229,10 @@ adds reminder tracking; `0006` adds the salon's contact columns (address, phone,
 maps_url, instagram_url, website_url); `0007` adds customer cancellation —
 `tenants.cancellation_cutoff_minutes`, `bookings.cancelled_at`, the
 `cancel_own_booking()` function, and re-creates `reminders_due()` with
-`tenant_liff_id` so the reminder card can link to 我的預約.
+`tenant_liff_id` so the reminder card can link to 我的預約; `0008` lets a tenant
+admin write services, staff, business_hours, closed_dates and six tenant
+columns, adds `set_business_hours()`, https-only link constraints and the
+slug-format constraint.
 
 Two things worth knowing before changing anything here:
 
@@ -222,6 +249,13 @@ Two things worth knowing before changing anything here:
   `not_cancellable` / `past` / `too_late`); `/api/bookings/cancel` only maps
   the code to a status. The screen's "can cancel" hint is advisory. A missing
   claim reads as `not_found`, never an error.
+- **Owner writes are gated by `current_is_tenant_admin()` in every 0008
+  policy**, so the route's 403 (`authenticateAdmin`) is a courtesy, not the
+  boundary. Services and staff have **no delete policy** — bookings reference
+  them with `on delete restrict`, so removal is `is_active = false`. The tenants
+  table is narrowed by a **column grant**, not a policy: `authenticated` may
+  update only address, phone, maps_url, instagram_url, website_url and
+  cancellation_cutoff_minutes. Name, logo, brand, slug and LINE ids are ours.
 - **Function grants: revoke from `public`, not just `anon`.** Postgres grants
   EXECUTE to PUBLIC on every new function, so `revoke ... from anon` alone
   changes nothing. `0007` revokes from `public, anon` and grants back to
@@ -229,7 +263,7 @@ Two things worth knowing before changing anything here:
   weaker pattern (harmless because they are claim-gated, but do not copy it).
 - **Migrations can be dry-run locally without Postgres installed.** pglite (an
   in-process Postgres, `npm i @electric-sql/pglite` in a scratch directory with
-  its `btree_gist` extension) applies `0001`–`0007` and the seed unchanged, given
+  its `btree_gist` extension) applies `0001`–`0008` and the seed unchanged, given
   a two-line shim for `auth.jwt()` and the three Supabase roles. That is how
   `0007`'s outcomes were exercised before it was ever pasted into the SQL editor.
 
@@ -252,10 +286,9 @@ to the admin view is also deferred: LIFF depends on browser storage that
 external browsers often block, and the intended fix is a short-lived signed link
 issued from the LIFF admin page, not a second auth system.
 
-The reminder job's tenant enumeration reads every tenant through a claim-gated
-function, so it scales, but `TENANT_SLUG` is still hardcoded in the four LIFF
-pages. Swapping that for a route segment is the one remaining step to real
-multi-tenancy.
+Owners cannot change their salon's name, logo or brand colours, and there is
+no admin-side cancel or reschedule — a flagged booking is sorted out by the
+owner contacting the customer. Both wait on an owner asking.
 
 Also deferred, from the 我的預約 work: notifying the salon owner when a customer
 cancels (no owner push path exists yet — the owner sees it on the admin page),
@@ -265,7 +298,7 @@ not wanted for the demo).
 ### Rich menu
 
 Four cells, one LIFF URL each. LIFF appends the path to the registered endpoint
-`/liff/booking`, so the URLs are:
+`/liff/booking/{slug}`, so the URLs are:
 
 | Cell | URL |
 | --- | --- |
@@ -274,6 +307,32 @@ Four cells, one LIFF URL each. LIFF appends the path to the registered endpoint
 | 店家資訊 | `https://liff.line.me/{liff_id}/info` |
 | 服務與方案 (DalaTech OA) | `https://line-business.vercel.app/pricing` — plain URL, not LIFF |
 
+The owner's schedule is `https://liff.line.me/{liff_id}/admin`; it is not on
+the customer rich menu.
+
 The confirmation and reminder cards carry a 查看我的預約 button to the `/mine`
 URL whenever the tenant row has a `liff_id`; without one the button is omitted
 and the notice falls back to "contact the salon".
+
+### Onboarding a salon
+
+In this order; each step depends on the one before.
+
+1. **Provider in the salon's legal name**, owned by the salon, with us added as
+   an admin.
+2. Under it, a **LINE Login channel** and a **LIFF app** with endpoint URL
+   `https://line-business.vercel.app/liff/booking/{slug}`, scopes `openid` and
+   `profile`, and **bot link** on (that is what prompts the friend-add, without
+   which pushes never arrive).
+3. The salon's **Messaging API channel (its official account) under the same
+   Provider**. A different Provider means a different user id, and every push
+   silently fails.
+4. A **tenants row** — slug, name, logo, brand, `line_login_channel_id`,
+   `liff_id` — plus its services, staff and hours. Copy
+   `supabase/seed_demo_tenant.sql` for the shape; afterwards the owner maintains
+   everything except the row's identity and branding.
+5. The owner opens `https://liff.line.me/{liff_id}/diagnostics`, which shows
+   their verified `sub`; insert a **tenant_admins** row for exactly that
+   `(tenant_id, line_user_id)`. Never promote by "earliest customer" — see
+   `supabase/fix_admin.sql` for why.
+6. The **rich menu** on their official account, per the table above.

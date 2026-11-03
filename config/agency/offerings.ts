@@ -35,6 +35,8 @@ export type AgencyProfile = {
   tagline: string;
   /** Where the 立即諮詢 button sends someone. */
   contactUrl: string;
+  /** The tenant the 體驗 button opens — a real tenant row, browsable by anyone. */
+  demoTenantSlug: string;
   offerings: Offering[];
   /** Answers to what prospects ask before buying. Optional. */
   faq: { question: string; answer: string }[];
@@ -47,6 +49,8 @@ export const dalaTech: AgencyProfile = {
   // TODO: point at whatever you want prospects to do — a LINE chat, a form, a
   // phone number (tel:) or an email (mailto:).
   contactUrl: "https://line.me/R/ti/p/@633jpqcp",
+
+  demoTenantSlug: "demo",
 
   offerings: [
     {
